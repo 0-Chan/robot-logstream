@@ -1,0 +1,15 @@
+# Dataset (raw ~32 GB, prepared ~12 GB): download / regenerate per README
+data/
+.cache/
+
+# Local documents
+*.pdf
+
+# Dependencies and build output
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+
+.DS_Store

@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+  - apps/*
+
+# pnpm 11 blocks dependency build scripts unless allowed; esbuild (used by tsx / vite) needs its postinstall.
+allowBuilds:
+  esbuild: true

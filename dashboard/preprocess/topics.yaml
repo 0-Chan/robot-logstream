@@ -1,0 +1,74 @@
+# Which raw topics to convert, and how.
+# kind: pointcloud | image | depth | series
+# Series field selection: `include` / `exclude` are regexes matched against Zarr field names.
+# Columns that are all zero in the whole sequence are dropped automatically (e.g. IMU orientation
+# on sensors that do not estimate it).
+
+defaults:
+  series_exclude: "_cov$"
+  image_max_side: 960
+  image_jpeg_quality: 80
+  depth_max_side: 640
+  pointcloud_scale_m: 0.01   # int16 quantization step -> +-327 m range
+
+pointcloud:
+  - hesai_points
+  - hesai_points_undistorted
+  - dlio_hesai_points_undistorted
+  - livox_points
+  - livox_points_undistorted
+  - velodyne_points
+  - velodyne_points_undistorted
+
+image:
+  - hdr_front
+  - hdr_left
+  - hdr_right
+  - alphasense_front_center
+  - alphasense_front_left
+  - alphasense_front_right
+  - alphasense_left
+  - alphasense_right
+  - zed2i_left_images
+  - zed2i_right_images
+
+depth:
+  - depth_camera_front_upper
+  - depth_camera_front_lower
+  - depth_camera_rear_upper
+  - depth_camera_rear_lower
+  - depth_camera_left
+  - depth_camera_right
+  - zed2i_depth_image
+  # - zed2i_depth_confidence_image   # 7.3 GB raw; enable if needed
+
+series:
+  # IMUs
+  stim320_imu: {}
+  anymal_imu: {}
+  adis_imu: {}
+  alphasense_imu: {}
+  livox_imu: {}
+  ap20_imu: {}
+  cpt7_imu: {}
+  # Robot state
+  anymal_state_state_estimator:
+    exclude: "_cov$|_contact$|_restitution_coef$|_friction_coef$|_normal$|_wrench_torque$"
+  anymal_state_actuator:
+    include: "^\\d\\d_(state_joint_position|state_joint_velocity|state_joint_torque|state_current|command_position|command_joint_torque)$"
+  anymal_command_twist: {}
+  anymal_state_battery: {}
+  # Odometry / pose estimates
+  anymal_state_odometry: {}
+  dlio_map_odometry: {}
+  cpt7_ie_tc_odometry: {}
+  cpt7_ie_rt_odometry: {}
+  zed2i_vio_map: {}
+  dlio_tf: {}
+  cpt7_ie_tc_tf: {}
+  cpt7_ie_rt_tf: {}
+  # Ground truth / GNSS
+  prism_position: {}
+  navsatfix_cpt7_ie_tc: {}
+  gnss_raw_cpt7_ie_tc: {}
+  gnss_raw_cpt7_ie_rt: {}
