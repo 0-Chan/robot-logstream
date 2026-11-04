@@ -1,6 +1,6 @@
 # Dataset (raw ~32 GB, prepared ~12 GB): download / regenerate per README
-data/
-.cache/
+/data/
+/.cache/
 
 # Local documents
 *.pdf
