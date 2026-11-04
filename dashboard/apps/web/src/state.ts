@@ -2,6 +2,7 @@
 // Streamed data itself lives in data/live.ts.
 import { create } from "zustand";
 import type { Manifest, TfFile } from "@grandtour/protocol";
+import { estimate } from "./data/clock.ts";
 
 export interface ChartConfig {
   topic: string;
@@ -49,12 +50,10 @@ export const useApp = create<AppState>()((set) => ({
   setUi: (patch) => set((s) => ({ ui: { ...s.ui, ...patch } })),
 }));
 
-/** Playhead estimated between 10 Hz server clock messages. */
+/** Playhead estimated between 10 Hz server clock messages; frozen while disconnected (data/clock.ts). */
 export function estimatePlayhead(): number {
-  const { clock, manifest } = useApp.getState();
-  if (!clock.playing) return clock.t;
-  const t = clock.t + ((performance.now() - clock.receivedAt) / 1000) * clock.speed;
-  return manifest ? Math.min(t, manifest.t1) : t;
+  const { clock, manifest, status } = useApp.getState();
+  return estimate(clock, performance.now(), status === "open", manifest?.t1 ?? Infinity);
 }
 
 /** Pose topic used to place everything in the DLIO map frame (verified: pose of hesai_lidar). */

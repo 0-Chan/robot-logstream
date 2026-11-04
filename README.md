@@ -145,13 +145,14 @@ UI는 **shadcn/ui**(Radix 기반, Nova 프리셋, 다크 테마 고정)와 **Tai
 
 ---
 
-## WebSocket 프로토콜 요약
+## WebSocket 프로토콜 요약 (v2)
 
 자세한 내용은 `dashboard/packages/protocol/src/messages.ts`에 있습니다.
 
 **제어 메시지 (JSON 텍스트)**
-- 서버 → 클라이언트: `hello{manifest}`, 100 ms마다 `clock{t, playing, speed, epoch}`, `error`
-- 클라이언트 → 서버: `subscribe{topics:[{name, maxHz?}]}`(교체 방식), `play{speed?}`, `pause`, `speed{speed}`, `seek{t}`
+- 서버 → 클라이언트: `hello{sessionId, manifest}`, 100 ms마다 `clock{t, playing, speed, epoch}`, `error`
+- 클라이언트 → 서버: `subscribe{topics:[{name, maxHz?}]}`(교체 방식), `play{speed?}`, `pause`, `speed{speed}`, `seek{t, epoch}`
+- **epoch는 클라이언트가 정합니다.** seek마다 이전보다 큰 값을 보내고, 서버는 그 뒤 만드는 데이터에 그 값을 찍습니다. 같거나 작은 epoch의 seek는 거부합니다.
 
 **데이터 메시지 (바이너리, 16바이트 헤더)**
 ```
@@ -164,8 +165,27 @@ SERIES_BATCH (2) : [u32 count][u32 cols][f64 ts × count][f32 values × count ×
 - 연결마다 독립된 재생 시계를 두고, 20 ms tick마다 처리합니다.
 - 시계열: 지난 tick 이후 샘플을 `maxHz`로 줄여 보냅니다. 버리지 않습니다.
 - 프레임: 재생 시각의 최신 프레임이 바뀌었을 때만 보냅니다. 소켓에 2 MB 넘게 쌓여 있으면 그 tick은 건너뜁니다(최신 우선).
-- seek: `epoch`를 올리고 시계열 5초치를 백필합니다. 클라이언트는 이전 epoch의 메시지를 버립니다.
+- seek: 클라이언트가 보낸 epoch로 바꾸고 시계열 5초치를 백필합니다. 읽는 도중 seek가 들어온 프레임은 보내지 않습니다.
+- 기록 끝에서 `play`를 받아도 스스로 처음으로 돌아가지 않습니다(새 epoch가 필요하므로 클라이언트가 seek를 먼저 보냄).
 - 웹소켓은 `@hono/node-server` 내장 `upgradeWebSocket`과 `ws`의 `WebSocketServer`를 씁니다. 배압 판단에 필요한 `bufferedAmount`는 `ws.raw`에서 읽습니다.
+
+## 화면에 잘못된 데이터를 표시하지 않기 위한 규칙
+
+고빈도 센서 처리(worker + `data/live.ts`)와 React 상태(zustand)를 분리합니다. 센서 메시지가 React 렌더링을 일으키지 않고, 렌더러는 `requestAnimationFrame`에서 데이터를 읽기만 합니다.
+
+| 단계 | 규칙 | 코드 |
+|---|---|---|
+| 수신 (worker) | 현재 소켓 + 현재 epoch + 토픽별로 더 새로운 시각인 메시지만 통과. 이미지·깊이는 **디코딩이 끝난 뒤 한 번 더 검사** | `apps/web/src/net/gate.ts` |
+| seek | worker가 epoch를 올리는 즉시 메인 스레드가 이전 위치의 프레임·점군·시계열을 모두 버림 → "이동 중…" | `net/worker.ts`, `data/live.ts` |
+| 표시 | 모든 패널이 같은 함수로 판정: `ok` / `stale`(센서 주기 3배 또는 0.3초 초과, 흐리게) / `future`(재생 시각 뒤, 절대 표시 안 함) / `none`(2초 초과 또는 없음) / `disconnected` | `data/select.ts` |
+| 연결 끊김 | 재생 시각을 즉시 멈추고, 마지막 화면에 "연결 끊김" 표시. 재생 조작 비활성. 재연결하면 같은 시각·같은 재생 상태로 이어서 재생 | `data/clock.ts`, `net/client.ts` |
+| 3D 정렬 | 점군은 **스캔 시각의 포즈**(보간)로 배치. 포즈를 알 수 없으면 그리지 않음 | `ui/Viewer3D.tsx` |
+
+**검증 방법**
+- 단위 테스트: `pnpm -r test` (게이트, 선택 규칙, 재생 시계, 서버 세션의 epoch 처리)
+- 서버 seek 폭주: `pnpm --filter @grandtour/server probe -- --storm 20 --seconds 30` → `0 violations`
+- 브라우저 표시 감사: 개발 콘솔에서 `__liveAudit` → 프레임을 그릴 때마다 epoch와 시각을 검사한 결과. `violations`는 항상 0이어야 합니다.
+- 느린 디코딩 재현(개발 모드): `http://localhost:5173/?decodeDelay=400`
 
 ## 새 토픽이나 새 시퀀스 추가
 

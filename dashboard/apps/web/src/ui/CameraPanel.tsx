@@ -2,11 +2,10 @@ import { useEffect, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { live } from "../data/live.ts";
+import { isDrawable, selectSample } from "../data/select.ts";
 import { estimatePlayhead, useApp } from "../state.ts";
 import { Empty, Notice, Panel } from "./Panel.tsx";
-
-/** A frame older than this many sensor periods (or 0.3 s) counts as a stale "previous sample". */
-const STALE_PERIODS = 3;
+import { ageText, noticeText } from "./sampleStatus.ts";
 
 export function CameraPanel({ slot }: { slot: 0 | 1 }) {
   const name = useApp((s) => s.ui.cameras[slot]);
@@ -18,38 +17,39 @@ export function CameraPanel({ slot }: { slot: 0 | 1 }) {
 
   useEffect(() => {
     if (!topic) return;
-    const staleSec = Math.max(0.3, topic.hz ? STALE_PERIODS / topic.hz : 0.3);
     let raf = 0;
     let drawn = -1;
     const draw = () => {
       raf = requestAnimationFrame(draw);
+      const c = canvas.current;
+      if (!c) return;
       const t = estimatePlayhead();
       const snap = live.images.get(topic.id);
-      const c = canvas.current;
-      // what to tell the user about this panel right now
-      let note = "";
-      if (t < topic.t0) note = "해당 시점 데이터 없음 (첫 프레임 이전)";
-      else if (!snap) note = "프레임 수신 대기 중…";
-      if (notice.current && notice.current.textContent !== note) notice.current.textContent = note;
-      if (c) c.style.visibility = t < topic.t0 ? "hidden" : "visible";
-      if (!snap || !c) {
-        if (age.current) age.current.textContent = "샘플 없음";
-        return;
-      }
-      if (snap.version !== drawn) {
-        if (c.width !== snap.bitmap.width || c.height !== snap.bitmap.height) {
-          c.width = snap.bitmap.width;
-          c.height = snap.bitmap.height;
+      const sel = selectSample(snap?.t, t, { hz: topic.hz, connected: useApp.getState().status === "open" });
+      const visible = !!snap && isDrawable(sel.state);
+
+      // Only ever show a frame the selection rule allows; otherwise blank the canvas.
+      c.style.visibility = visible ? "visible" : "hidden";
+      c.style.opacity = sel.state === "ok" ? "1" : "0.55";
+      if (visible) {
+        if (snap.version !== drawn) {
+          if (c.width !== snap.bitmap.width || c.height !== snap.bitmap.height) {
+            c.width = snap.bitmap.width;
+            c.height = snap.bitmap.height;
+          }
+          const ctx = c.getContext("2d")!;
+          ctx.clearRect(0, 0, c.width, c.height);
+          ctx.drawImage(snap.bitmap, 0, 0);
+          drawn = snap.version;
         }
-        const ctx = c.getContext("2d")!;
-        ctx.clearRect(0, 0, c.width, c.height);
-        ctx.drawImage(snap.bitmap, 0, 0);
-        drawn = snap.version;
+        live.recordDraw(snap, t);
       }
+
+      const note = noticeText(sel, { beforeStart: t < topic.t0, moving: live.moving(), noun: "프레임" });
+      if (notice.current && notice.current.textContent !== note) notice.current.textContent = note;
       if (age.current) {
-        const sec = t - snap.t;
-        age.current.textContent = `샘플 경과 ${Math.max(0, sec * 1000).toFixed(0)} ms`;
-        age.current.dataset.stale = String(sec > staleSec);
+        age.current.textContent = ageText(sel);
+        age.current.dataset.stale = String(sel.state === "stale");
       }
     };
     raf = requestAnimationFrame(draw);
@@ -79,8 +79,9 @@ export function CameraPanel({ slot }: { slot: 0 | 1 }) {
             </Badge>
           </TooltipTrigger>
           <TooltipContent className="max-w-64">
-            재생 시각과 표시 중인 프레임의 센서 타임스탬프 차이입니다(네트워크 지연이 아님). 센서 주기의 {STALE_PERIODS}배를
-            넘으면 노란색으로 바뀌며, 이전 샘플을 보여 주는 중이라는 뜻입니다.
+            재생 시각과 표시 중인 프레임의 센서 타임스탬프 차이입니다(네트워크 지연이 아님). 센서 주기의 3배(최소
+            0.3초)를 넘으면 노란색 "이전 샘플"로 바뀌고, 2초를 넘으면 표시하지 않습니다. 재생 시각보다 뒤의 프레임은 절대
+            표시하지 않습니다.
           </TooltipContent>
         </Tooltip>
       }

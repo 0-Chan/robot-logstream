@@ -12,13 +12,15 @@ import {
   type ServerMessage,
 } from "@grandtour/protocol";
 import { TURBO_LUT } from "./colormap.ts";
+import { Gate } from "./gate.ts";
 import type { FromWorker, ToWorker } from "./messages.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
 let ws: WebSocket | null = null;
 let manifest: Manifest | null = null;
-let epoch = 0;
+const gate = new Gate();
+let debugDecodeDelayMs = 0;
 let bytes = 0;
 let frames = 0;
 
@@ -30,9 +32,24 @@ const DEPTH_MAX = 8000;
 
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const m = e.data;
-  if (m.type === "connect") connect(m.url);
+  if (m.type === "connect") {
+    debugDecodeDelayMs = m.debugDecodeDelayMs ?? 0;
+    connect(m.url);
+  }
+  else if (m.type === "seek") seek(m.t);
   else if (m.type === "send" && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m.msg));
 };
+
+/**
+ * Seeks go through the worker because it owns the epoch: bump it, tell the main thread (which drops
+ * everything older right away), then ask the server. Data for the old position is rejected from this
+ * moment on, even if it is already in flight.
+ */
+function seek(t: number) {
+  const epoch = gate.nextEpoch();
+  post({ type: "epoch", epoch });
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: "seek", t, epoch }));
+}
 
 function connect(url: string) {
   if (ws) {
@@ -40,6 +57,7 @@ function connect(url: string) {
     ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
     ws.close();
   }
+  const socketId = gate.newSocket();
   post({ type: "status", status: "connecting" });
   const sock = new WebSocket(url);
   ws = sock;
@@ -53,56 +71,54 @@ function connect(url: string) {
   sock.onclose = () => post({ type: "status", status: "closed", error });
   sock.onmessage = (ev) => {
     if (typeof ev.data === "string") onControl(JSON.parse(ev.data) as ServerMessage);
-    else onData(ev.data as ArrayBuffer).catch((err) => post({ type: "error", message: String(err) }));
+    else onData(socketId, ev.data as ArrayBuffer).catch((err) => post({ type: "error", message: String(err) }));
   };
 }
 
 function onControl(msg: ServerMessage) {
   if (msg.op === "hello") {
     manifest = msg.manifest;
-    epoch = 0;
-    post({ type: "hello", manifest: msg.manifest });
+    post({ type: "hello", manifest: msg.manifest, sessionId: msg.sessionId });
   } else if (msg.op === "clock") {
-    bumpEpoch(msg.epoch);
+    // A clock from before our latest seek would jump the playhead back to the old position.
+    if (msg.epoch !== gate.epoch) return;
     post({ type: "clock", t: msg.t, playing: msg.playing, speed: msg.speed, epoch: msg.epoch });
   } else if (msg.op === "error") {
     post({ type: "error", message: msg.message });
   }
 }
 
-/** Data for a new epoch can arrive before the clock that announces it (seek backfill). */
-function bumpEpoch(e: number) {
-  if (e > epoch) {
-    epoch = e;
-    post({ type: "epoch", epoch });
-  }
-}
-
-async function onData(buf: ArrayBuffer) {
+async function onData(socketId: number, buf: ArrayBuffer) {
   bytes += buf.byteLength;
   const m = decodeData(buf);
-  if (m.epoch < epoch) return; // stale: sent before the latest seek
-  bumpEpoch(m.epoch);
   const topic = manifest?.topics[m.topicId];
-  if (!topic) return;
+  if (!topic || !gate.admits(socketId, m.epoch, m.topicId, m.t)) return;
+  // Re-checked with commit() right before posting: the work below (esp. async decodes) can be
+  // overtaken by a seek, a reconnect, or a newer frame of the same topic.
+  const deliver = () => gate.commit(socketId, m.epoch, m.topicId, m.t);
 
   if (m.type === MsgType.SeriesBatch) {
+    if (!deliver()) return;
     // copy out of the socket buffer so the arrays can be transferred independently
     const ts = m.ts.slice();
     const values = m.values.slice();
-    post({ type: "series", topicId: m.topicId, ts, values, cols: m.cols }, [ts.buffer, values.buffer]);
+    post({ type: "series", topicId: m.topicId, epoch: m.epoch, ts, values, cols: m.cols }, [ts.buffer, values.buffer]);
     return;
   }
   frames++;
   if (topic.kind === "pointcloud") {
     const { positions, colors, n } = pointCloud(topic, m.payload);
-    post({ type: "pointcloud", topicId: m.topicId, t: m.t, n, positions, colors }, [positions.buffer, colors.buffer]);
-  } else if (topic.kind === "image") {
-    const bitmap = await createImageBitmap(new Blob([m.payload], { type: "image/jpeg" }));
-    post({ type: "image", topicId: m.topicId, t: m.t, bitmap }, [bitmap]);
-  } else if (topic.kind === "depth") {
-    const bitmap = await depthBitmap(m.payload);
-    post({ type: "image", topicId: m.topicId, t: m.t, bitmap }, [bitmap]);
+    if (!deliver()) return;
+    post({ type: "pointcloud", topicId: m.topicId, epoch: m.epoch, t: m.t, n, positions, colors }, [positions.buffer, colors.buffer]);
+  } else {
+    const bitmap =
+      topic.kind === "image" ? await createImageBitmap(new Blob([m.payload], { type: "image/jpeg" })) : await depthBitmap(m.payload);
+    if (debugDecodeDelayMs) await new Promise((r) => setTimeout(r, debugDecodeDelayMs * (0.5 + Math.random())));
+    if (!deliver()) {
+      bitmap.close();
+      return;
+    }
+    post({ type: "image", topicId: m.topicId, epoch: m.epoch, t: m.t, bitmap }, [bitmap]);
   }
 }
 

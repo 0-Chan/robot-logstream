@@ -3,8 +3,10 @@ import uPlot from "uplot";
 import type { SeriesTopic } from "@grandtour/protocol";
 import { CHART_COLOR_VARS, themeVar } from "@/lib/theme";
 import { live } from "../data/live.ts";
+import { selectSample } from "../data/select.ts";
 import { estimatePlayhead, useApp } from "../state.ts";
-import { Empty, Panel } from "./Panel.tsx";
+import { Empty, Notice, Panel } from "./Panel.tsx";
+import { noticeText } from "./sampleStatus.ts";
 
 const REDRAW_MS = 66; // ~15 fps is plenty for a scrolling chart
 
@@ -14,6 +16,7 @@ export function ChartPanel({ slot }: { slot: 0 | 1 }) {
   const manifest = useApp((s) => s.manifest);
   const topic = manifest?.topics.find((t) => t.name === chart?.topic && t.kind === "series") as SeriesTopic | undefined;
   const host = useRef<HTMLDivElement>(null);
+  const notice = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = host.current;
@@ -60,6 +63,11 @@ export function ChartPanel({ slot }: { slot: 0 | 1 }) {
           colIdx.forEach((c, k) => ys[k].push(row[c] + offsets[k]));
         }
       }
+      const connected = useApp.getState().status === "open";
+      const end = buf ? buf.indexAtOrBefore(t) : -1;
+      const sel = selectSample(buf && end >= 0 ? buf.ts[end] : undefined, t, { hz: topic.hz, connected });
+      const note = noticeText(sel, { beforeStart: t < topic.t0, moving: live.moving(), noun: "데이터" });
+      if (notice.current && notice.current.textContent !== note) notice.current.textContent = note;
       plot.setData([xs, ...ys], false);
       plot.setScale("x", { min: t - t0 - windowSec, max: t - t0 });
       plot.redraw(false, true); // rescale y to visible data
@@ -85,6 +93,7 @@ export function ChartPanel({ slot }: { slot: 0 | 1 }) {
   return (
     <Panel title={`${topic.name} · 최근 ${windowSec}s`}>
       <div className="chart-host h-full pt-7" ref={host} />
+      <Notice ref={notice} />
     </Panel>
   );
 }

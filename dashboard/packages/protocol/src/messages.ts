@@ -9,10 +9,15 @@
 //                 pointcloud: [u32 n][i16 xyz * n][u8 intensity * n]
 //                 image/depth: a JPEG / 16-bit PNG file
 //   SERIES_BATCH payload = [u32 count][u32 cols][f64 ts * count][f32 values * count * cols]
+//
+// Epochs (v2): the CLIENT owns the epoch. Every seek carries a new, strictly larger epoch and the
+// server stamps all data produced after it with that value. The client bumps its epoch the moment it
+// sends the seek, so data for the old position can never be mistaken for the new one. Each connection
+// is a new session (sessionId in hello); the client also discards anything from older sockets.
 
 import type { Manifest } from "./manifest.ts";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const HEADER_BYTES = 16;
 
 export const MsgType = { Frame: 1, SeriesBatch: 2 } as const;
@@ -28,12 +33,13 @@ export type ClientMessage =
   | { op: "subscribe"; topics: SubscribeTopic[] }
   | { op: "play"; speed?: number }
   | { op: "pause" }
-  | { op: "seek"; t: number }
+  /** epoch must be greater than any epoch sent before on this connection. */
+  | { op: "seek"; t: number; epoch: number }
   | { op: "speed"; speed: number };
 
 // ---- control: server -> client ----
 export type ServerMessage =
-  | { op: "hello"; protocolVersion: number; manifest: Manifest }
+  | { op: "hello"; protocolVersion: number; sessionId: string; manifest: Manifest }
   | { op: "clock"; t: number; playing: boolean; speed: number; epoch: number }
   | { op: "error"; message: string };
 

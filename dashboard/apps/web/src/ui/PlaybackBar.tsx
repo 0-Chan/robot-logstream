@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,10 +7,12 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { send } from "../net/client.ts";
+import { pause, play, seek, setSpeed } from "../net/client.ts";
 import { estimatePlayhead, useApp } from "../state.ts";
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
+/** While dragging the timeline, send at most this many seeks per second (each one is a new epoch). */
+const DRAG_SEEK_INTERVAL_MS = 100;
 const STATUS_LABEL = { connecting: "연결 중", open: "연결됨", closed: "끊김" } as const;
 
 function StatusDot({ status }: { status: keyof typeof STATUS_LABEL }) {
@@ -31,6 +33,8 @@ export function PlaybackBar() {
   const status = useApp((s) => s.status);
   const stats = useApp((s) => s.stats);
   const [scrub, setScrub] = useState<number | null>(null);
+  const lastDragSeek = useRef(0);
+  const live = !!manifest && status === "open";
   const [display, setDisplay] = useState(0);
 
   // smooth playhead between 10 Hz clock messages
@@ -68,9 +72,9 @@ export function PlaybackBar() {
         <TooltipTrigger asChild>
           <Button
             size="icon"
-            disabled={!manifest}
+            disabled={!live}
             aria-label={clock.playing ? "일시정지" : "재생"}
-            onClick={() => send(clock.playing ? { op: "pause" } : { op: "play" })}
+            onClick={() => (clock.playing ? pause() : play())}
           >
             {clock.playing ? <Pause /> : <Play />}
           </Button>
@@ -78,7 +82,7 @@ export function PlaybackBar() {
         <TooltipContent>{clock.playing ? "일시정지" : "재생"}</TooltipContent>
       </Tooltip>
 
-      <Select value={String(clock.speed)} onValueChange={(v) => send({ op: "speed", speed: Number(v) })} disabled={!manifest}>
+      <Select value={String(clock.speed)} onValueChange={(v) => setSpeed(Number(v))} disabled={!live}>
         <SelectTrigger size="sm" className="w-20" aria-label="재생 속도">
           <SelectValue />
         </SelectTrigger>
@@ -97,13 +101,22 @@ export function PlaybackBar() {
         max={Math.max(dur, 0.01)}
         step={0.05}
         value={[Math.min(Math.max(rel, 0), dur)]}
-        disabled={!manifest}
+        disabled={!live}
         aria-label="타임라인"
         onValueChange={([v]) => {
           setScrub(t0 + v);
-          send({ op: "seek", t: t0 + v });
+          const now = performance.now();
+          if (now - lastDragSeek.current >= DRAG_SEEK_INTERVAL_MS) {
+            lastDragSeek.current = now;
+            seek(t0 + v);
+          }
         }}
-        onValueCommit={() => setScrub(null)}
+        onValueCommit={([v]) => {
+          seek(t0 + v); // always land exactly where the user let go
+          // Radix calls onValueCommit BEFORE onValueChange for keyboard input; clearing in the same tick
+          // would be undone and leave the display stuck at the scrub value.
+          setTimeout(() => setScrub(null), 0);
+        }}
       />
 
       <span className="w-28 text-right text-xs tabular-nums text-muted-foreground">

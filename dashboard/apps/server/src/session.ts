@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import {
+  PROTOCOL_VERSION,
   encodeFrame,
   encodeSeriesBatch,
   type ClientMessage,
@@ -39,6 +41,7 @@ export interface SessionStats {
  *  - frame topics: the latest frame at the playhead if it changed (dropped under backpressure)
  */
 export class PlaybackSession {
+  readonly sessionId = randomUUID();
   playhead: number;
   playing = false;
   speed = 1;
@@ -58,7 +61,7 @@ export class PlaybackSession {
   }
 
   start() {
-    this.send({ op: "hello", protocolVersion: 1, manifest: this.data.manifest });
+    this.send({ op: "hello", protocolVersion: PROTOCOL_VERSION, sessionId: this.sessionId, manifest: this.data.manifest });
     this.sendClock();
     this.timer = setInterval(() => this.tick(), config.tickMs);
   }
@@ -80,9 +83,9 @@ export class PlaybackSession {
         this.subscribe(msg.topics);
         break;
       case "play":
+        // Rewinding at the end is the client's job (it must pick the new epoch), so playing at t1 is a no-op.
         if (msg.speed) this.speed = clampSpeed(msg.speed);
-        if (this.playhead >= this.data.manifest.t1) this.seek(this.data.manifest.t0);
-        this.playing = true;
+        this.playing = this.playhead < this.data.manifest.t1;
         this.lastWall = performance.now();
         break;
       case "pause":
@@ -92,7 +95,9 @@ export class PlaybackSession {
         this.speed = clampSpeed(msg.speed);
         break;
       case "seek":
-        this.seek(msg.t);
+        // The client owns the epoch; ignore duplicates or reordered seeks that would move it backwards.
+        if (!(msg.epoch > this.epoch)) return this.send({ op: "error", message: `stale seek epoch ${msg.epoch} <= ${this.epoch}` });
+        this.seek(msg.t, msg.epoch);
         break;
       default:
         return this.send({ op: "error", message: `unknown op ${(msg as { op: string }).op}` });
@@ -123,10 +128,10 @@ export class PlaybackSession {
     this.series = nextSeries;
   }
 
-  private seek(t: number) {
+  private seek(t: number, epoch: number) {
     const { t0, t1 } = this.data.manifest;
     this.playhead = Math.min(Math.max(t, t0), t1);
-    this.epoch++;
+    this.epoch = epoch;
     this.lastWall = performance.now();
     for (const f of this.frames.values()) f.lastSent = -1; // resend at new playhead on next tick
     for (const s of this.series.values()) this.backfill(s);

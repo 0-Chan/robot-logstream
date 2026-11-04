@@ -5,11 +5,13 @@ import * as THREE from "three";
 import type { PointCloudTopic, SeriesTopic } from "@grandtour/protocol";
 import { Badge } from "@/components/ui/badge";
 import { themeVarHex } from "@/lib/theme";
-import { live } from "../data/live.ts";
+import { live, type SeriesBuffer } from "../data/live.ts";
+import { isDrawable, maxAgeFor, selectSample } from "../data/select.ts";
 import { TfTree } from "../data/tf.ts";
 import { SERVER_URL } from "../net/client.ts";
 import { WORLD_POSE_FRAME, WORLD_POSE_TOPIC, estimatePlayhead, useApp } from "../state.ts";
 import { Notice, Panel } from "./Panel.tsx";
+import { noticeText } from "./sampleStatus.ts";
 
 const MAX_TRAIL = 4000;
 
@@ -35,16 +37,25 @@ export function Viewer3D() {
     const loop = () => {
       raf = requestAnimationFrame(loop);
       const t = estimatePlayhead();
+      const connected = useApp.getState().status === "open";
       const notes: string[] = [];
+      if (!connected) notes.push(noticeText({ state: "disconnected", age: NaN }, { beforeStart: false, moving: false, noun: "" }));
       if (lidar) {
         if (!tf) notes.push("좌표 변환(TF) 불러오는 중…");
         else if (!tf.has(lidar.frameId)) notes.push(`좌표 변환 정보 없음: ${lidar.frameId}`);
-        if (t < lidar.t0) notes.push("해당 시점 점군 데이터 없음 (첫 스캔 이전)");
-        else if (!live.pointclouds.get(lidar.id)) notes.push("점군 수신 대기 중…");
+        const snap = live.pointclouds.get(lidar.id);
+        const sel = selectSample(snap?.t, t, { hz: lidar.hz, connected });
+        if (connected) {
+          const note = noticeText(sel, { beforeStart: t < lidar.t0, moving: live.moving(), noun: "점군" });
+          if (note) notes.push(note);
+          else if (sel.state === "stale") notes.push(`이전 점군 표시 중 (${(sel.age * 1000).toFixed(0)} ms 전)`);
+        }
       }
-      if (ui.worldView && pose) {
+      if (connected && ui.worldView && pose) {
         const buf = live.series.get(pose.id);
-        if (t < pose.t0 || !buf || buf.indexAtOrBefore(t) < 0) notes.push("해당 시점 포즈 없음: 점군과 로봇을 맵에 배치할 수 없습니다");
+        const i = buf ? buf.indexAtOrBefore(t) : -1;
+        const sel = selectSample(buf && i >= 0 ? buf.ts[i] : undefined, t, { hz: pose.hz, connected });
+        if (!isDrawable(sel.state)) notes.push("해당 시점 포즈 없음: 점군과 로봇을 맵에 배치할 수 없습니다");
       }
       const text = notes.join(" · ");
       if (notice.current && notice.current.textContent !== text) notice.current.textContent = text;
@@ -101,19 +112,24 @@ function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: S
   }, []);
   const trail = trailLine.geometry;
 
+  const scanGeom = useMemo(() => new THREE.BufferGeometry(), []);
+  useEffect(() => () => scanGeom.dispose(), [scanGeom]);
+  const shownScan = useRef(-1);
+  const scanPose = useMemo(() => new THREE.Matrix4(), []);
+
   useFrame(() => {
     const t = estimatePlayhead();
-    // --- world pose (latest DLIO pose at or before playhead) ---
+    const connected = useApp.getState().status === "open";
+    const buf = pose ? live.series.get(pose.id) : undefined;
+
+    // --- world pose at the playhead (robot marker, trail, camera follow) ---
     let havePose = false;
-    if (pose && poseCols) {
-      const buf = live.series.get(pose.id);
-      const i = buf ? buf.indexAtOrBefore(t) : -1;
-      if (buf && i >= 0) {
-        const r = buf.row(i);
-        const v = poseCols.cols.map((c, k) => r[c] + poseCols.offsets[k]);
-        poseMatrix.compose(new THREE.Vector3(v[0], v[1], v[2]), new THREE.Quaternion(v[3], v[4], v[5], v[6]), new THREE.Vector3(1, 1, 1));
-        havePose = true;
-        // trail: all buffered poses up to the playhead
+    if (pose && poseCols && buf) {
+      const i = buf.indexAtOrBefore(t);
+      const sel = selectSample(i >= 0 ? buf.ts[i] : undefined, t, { hz: pose.hz, connected });
+      if (i >= 0 && isDrawable(sel.state)) {
+        havePose = poseAt(buf, poseCols, t, maxAgeFor(pose.hz), poseMatrix);
+        // trail: buffered poses up to the playhead
         const pos = trail.getAttribute("position") as THREE.BufferAttribute;
         const start = Math.max(0, i + 1 - MAX_TRAIL);
         for (let k = start; k <= i; k++) {
@@ -144,11 +160,26 @@ function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: S
         }
       }
     }
-    // --- scan mounting ---
+    // --- scan: only if the selection rule allows it, placed with the pose at the SCAN's timestamp ---
     if (scanGroup.current) {
-      const m = mount ? (pose ? (havePose ? poseMatrix.clone().multiply(mount) : null) : mount) : null;
+      const snap = lidar ? live.pointclouds.get(lidar.id) : undefined;
+      const sel = selectSample(snap?.t, t, { hz: lidar?.hz ?? null, connected });
+      let m: THREE.Matrix4 | null = null;
+      if (snap && mount && isDrawable(sel.state)) {
+        if (!pose) m = mount;
+        else if (buf && poseCols && poseAt(buf, poseCols, snap.t, maxAgeFor(pose.hz), scanPose)) m = scanPose.clone().multiply(mount);
+      }
       scanGroup.current.visible = !!m;
-      if (m) scanGroup.current.matrix.copy(m);
+      if (m && snap) {
+        scanGroup.current.matrix.copy(m);
+        if (snap.version !== shownScan.current) {
+          scanGeom.setAttribute("position", new THREE.BufferAttribute(snap.positions, 3));
+          scanGeom.setAttribute("color", new THREE.BufferAttribute(snap.colors, 3, true));
+          scanGeom.computeBoundingSphere();
+          shownScan.current = snap.version;
+        }
+        live.recordDraw(snap, t);
+      }
     }
   });
 
@@ -172,29 +203,12 @@ function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: S
           </mesh>
         </group>
         <group ref={scanGroup} matrixAutoUpdate={false}>
-          {lidar && <LivePoints topicId={lidar.id} />}
+          <points geometry={scanGeom}>
+            <pointsMaterial size={0.06} vertexColors sizeAttenuation />
+          </points>
         </group>
       </group>
     </>
-  );
-}
-
-function LivePoints({ topicId }: { topicId: number }) {
-  const geom = useMemo(() => new THREE.BufferGeometry(), []);
-  const shown = useRef(-1);
-  useEffect(() => () => geom.dispose(), [geom]);
-  useFrame(() => {
-    const snap = live.pointclouds.get(topicId);
-    if (!snap || snap.version === shown.current) return;
-    geom.setAttribute("position", new THREE.BufferAttribute(snap.positions, 3));
-    geom.setAttribute("color", new THREE.BufferAttribute(snap.colors, 3, true));
-    geom.computeBoundingSphere();
-    shown.current = snap.version;
-  });
-  return (
-    <points geometry={geom}>
-      <pointsMaterial size={0.06} vertexColors sizeAttenuation />
-    </points>
   );
 }
 
@@ -232,4 +246,35 @@ function StaticMap() {
       <pointsMaterial size={0.04} vertexColors sizeAttenuation transparent opacity={0.55} />
     </points>
   );
+}
+
+/**
+ * Pose (T_map_hesai) at time t. Interpolates between the surrounding samples (lerp + slerp) when they
+ * are close together; otherwise uses the last sample only if it is recent enough. Fails rather than
+ * guessing: no placement is better than a scan drawn at the wrong place.
+ */
+function poseAt(
+  buf: SeriesBuffer,
+  pc: { cols: number[]; offsets: number[] },
+  t: number,
+  maxGap: number,
+  out: THREE.Matrix4,
+): boolean {
+  const i = buf.indexAtOrBefore(t);
+  if (i < 0) return false;
+  const read = (k: number) => pc.cols.map((c, j) => buf.row(k)[c] + pc.offsets[j]);
+  const a = read(i);
+  const p = new THREE.Vector3(a[0], a[1], a[2]);
+  const q = new THREE.Quaternion(a[3], a[4], a[5], a[6]);
+  const j = i + 1;
+  if (j < buf.length && buf.ts[j] - buf.ts[i] <= maxGap) {
+    const b = read(j);
+    const u = (t - buf.ts[i]) / (buf.ts[j] - buf.ts[i]);
+    p.lerp(new THREE.Vector3(b[0], b[1], b[2]), u);
+    q.slerp(new THREE.Quaternion(b[3], b[4], b[5], b[6]), u);
+  } else if (t - buf.ts[i] > maxGap) {
+    return false;
+  }
+  out.compose(p, q, new THREE.Vector3(1, 1, 1));
+  return true;
 }
