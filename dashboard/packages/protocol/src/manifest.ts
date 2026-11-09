@@ -83,13 +83,29 @@ export interface MapInfo {
   sameFrameAs: string;
 }
 
+/** Simple CAD model of the site (dashboard/preprocess cad-extract + cad-build). */
+export interface CadInfo {
+  /** GLB in metres, Z up, same frame as `frame`. */
+  file: string;
+  /** STEP source in millimetres (not served to the browser). */
+  step: string;
+  frame: string;
+  walls: number;
+  slabs: number;
+  triangles: number;
+  bboxMin: [number, number, number];
+  bboxMax: [number, number, number];
+  /** Share of map points within 5/10/25 cm of a CAD surface. */
+  mapFit: { within5cm: number; within10cm: number; within25cm: number; medianDistance: number; points: number };
+}
+
 export interface Manifest {
   layoutVersion: number;
   sequence: string;
   t0: number;
   t1: number;
   quaternionOrder: "xyzw";
-  static: { tf: string; map?: MapInfo };
+  static: { tf: string; map?: MapInfo; cad?: CadInfo };
   topics: TopicMeta[];
 }
 

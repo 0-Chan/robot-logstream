@@ -187,6 +187,49 @@ SERIES_BATCH (2) : [u32 count][u32 cols][f64 ts × count][f32 values × count ×
 - 브라우저 표시 감사: 개발 콘솔에서 `__liveAudit` → 프레임을 그릴 때마다 epoch와 시각을 검사한 결과. `violations`는 항상 0이어야 합니다.
 - 느린 디코딩 재현(개발 모드): `http://localhost:5173/?decodeDelay=400`
 
+## 간이 CAD 지도와 CAD 기반 위치 추정 (오프라인 검증)
+
+GrandTour 데이터셋에는 현장 CAD가 없습니다. 그래서 DLIO 점군 지도에서 **큰 평면(벽, 바닥, 천장)만 뽑아 간이 CAD를 만들고**, 녹화된 LiDAR 스캔을 그 CAD에 맞춰 로봇 위치를 다시 계산합니다. 로봇에 탑재해 실시간으로 도는 위치 추정이 아니라, **"설계도 수준의 단순한 지도로 위치를 유지할 수 있는가"를 녹화 데이터로 확인하는 파이프라인**입니다.
+
+```bash
+cd dashboard/preprocess
+P=../../data/prepared/2024-11-02-17-10-25
+uv run cad-extract --prepared $P   # 지도 → cad/site.yaml (벽·슬래브 목록, 손으로 고쳐도 됨)
+uv run cad-build   --prepared $P   # site.yaml → cad/site.step (mm, CAD 프로그램용) + static/cad.glb (m, 웹용)
+uv run localize    --prepared $P   # 스캔 × CAD → topics/cad_localization (+ summary.json), manifest 갱신
+```
+
+1. **cad-extract:** RANSAC으로 평면을 반복해 찾습니다. 각 평면의 점을 0.25 m 격자에 찍고 직사각형 몇 개로 덮습니다. 그래서 문이 뚫린 벽은 여러 조각이 됩니다. 경사면(계단, 램프)은 제외합니다.
+   - `site.yaml` 규칙: 벽의 **면**은 선분 a→b입니다. 두께는 위에서 볼 때 a→b의 **오른쪽**으로 붙고, 로봇이 보는 쪽은 왼쪽입니다.
+   - 슬래브는 다각형 높이 z가 면입니다. `side: down`이면 바닥, `side: up`이면 천장입니다.
+2. **cad-build:** CadQuery로 솔리드를 만들어 STEP(mm)으로 저장합니다. 같은 솔리드를 삼각형으로 바꿔 GLB(m, Z-up, 노드 이름 `wall_NNN`/`slab_NNN`)로도 저장합니다.
+   - 지도 점이 CAD 표면에서 얼마나 가까운지를 `static/cad.json`의 `mapFit`에 기록합니다.
+3. **localize:** 스캔마다 다음을 반복합니다.
+   - **예측:** 이전 위치를 다리 오도메트리(`anymal_state_odometry`)만큼 옮깁니다.
+   - **보정:** CAD 면까지의 point-to-plane ICP를 오도메트리 예측을 사전 정보(prior)로 둔 최적화로 풉니다. 그래서 CAD가 잡아 주지 못하는 방향(예: 가로 벽이 없는 긴 보행로의 길이 방향)은 오도메트리를 따르고 미끄러지지 않습니다.
+   - DLIO는 **첫 위치를 정할 때와 채점할 때만** 씁니다.
+   - 출력 열은 `pose_*`(DLIO와 같은 이름), `fitness`, `rmse`, `lost`, `constrainedDims`(CAD가 오도메트리보다 강하게 잡아 준 방향 수, 0~6), `err_pos`, `err_yaw`(DLIO 대비), `odom_err_pos`(오도메트리만 썼을 때의 오차)입니다.
+
+웹에서는 사이드바 **지도 → 간이 CAD / 겹쳐 보기**, **CAD 위치 추정 마커**(주황, 실패 구간은 빨강)를 켜고, 차트 프리셋 **CAD 위치 추정 오차**, **CAD 정합 품질**을 고르면 됩니다. CAD는 로봇 높이 + 1.5 m 위를 잘라서 표시합니다.
+
+**이 시퀀스 결과(2024-11-02-17-10-25, hesai 스캔 3,865개):**
+
+| 항목 | 값 |
+|---|---|
+| 간이 CAD | 벽 43개, 슬래브 200개. 지도 점의 46%가 CAD 표면 10 cm 이내 |
+| CAD 위치 추정 오차(DLIO 대비) | 평균 0.32 m, p95 0.78 m, 최대 1.47 m, 방향각 p95 1.5° |
+| 오도메트리만 쓴 경우 | 최대 1.44 m |
+| 시작 위치를 0.5 m, 10° 틀리게 준 경우 | 약 22초 뒤 벽이 보이는 구간에서 회복(평균 0.30 m) |
+| 스캔 점 50%만 사용 | 평균 0.34 m, p95 0.91 m |
+
+- 오차가 큰 구간은 벽이 없는 눈 덮인 광장(y ≈ −20 ~ −28 m)입니다. 바닥밖에 없어 수평 위치를 CAD로 잡을 수 없습니다.
+- 작은 조각을 지운 CAD(`--min-area 3`)는 화면은 깔끔하지만 오차가 커졌습니다(평균 0.40 m, p95 1.0 m).
+
+**한계:**
+- CAD를 DLIO 지도에서 만들었기 때문에, DLIO와의 비교는 독립적인 검증이 아닙니다.
+- `lost` 판정 기준(fitness, rmse, 보정량)은 이 시퀀스에서 한 번도 걸리지 않았습니다. 실제로 실패를 잡아내는지는 아직 확인하지 못했습니다.
+- 실제 현장 CAD를 쓰려면 STEP을 GLB로 바꾸고, `dlio_map`(또는 로봇 지도)과 CAD 좌표 사이의 변환을 먼저 구해야 합니다.
+
 ## 새 토픽이나 새 시퀀스 추가
 
 1. **새 시퀀스:** `data/raw/<새 시퀀스>`에 받은 뒤 `uv run prep --src ../../data/raw/<새 시퀀스>`, 그리고 `PREPARED_DIR=.../data/prepared/<새 시퀀스> pnpm --filter @grandtour/server dev`
@@ -208,5 +251,6 @@ SERIES_BATCH (2) : [u32 count][u32 cols][f64 ts × count][f32 values × count ×
 
 ```bash
 cd dashboard && pnpm -r test && pnpm -r typecheck   # protocol round-trip, 이진 탐색, 다운샘플링
-cd preprocess && uv run verify --src ../../data/raw/2024-11-02-17-10-25
+cd preprocess && uv run pytest -q   # 간이 CAD 치수, 사각형 분할, 합성 방에서 포즈 복원
+uv run verify --src ../../data/raw/2024-11-02-17-10-25
 ```

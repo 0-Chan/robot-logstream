@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { useApp, type ChartConfig } from "../state.ts";
+import { CAD_POSE_TOPIC, useApp, type ChartConfig, type MapMode } from "../state.ts";
 
 const NONE = "__none__"; // Radix Select does not allow an empty-string item value
 const MAX_COLUMNS = 8;
@@ -30,6 +30,15 @@ const CHART_PRESETS: { label: string; chart: ChartConfig }[] = [
   { label: "STIM320 가속도", chart: { topic: "stim320_imu", columns: ["lin_acc.x", "lin_acc.y", "lin_acc.z"] } },
   { label: "조종 명령", chart: { topic: "anymal_command_twist", columns: ["linear.x", "linear.y", "angular.z"] } },
   { label: "배터리", chart: { topic: "anymal_state_battery", columns: ["voltage", "current", "state_of_charge"] } },
+  { label: "CAD 위치 추정 오차 (m)", chart: { topic: CAD_POSE_TOPIC, columns: ["err_pos", "odom_err_pos"] } },
+  { label: "CAD 정합 품질", chart: { topic: CAD_POSE_TOPIC, columns: ["fitness", "rmse", "constrainedDims"] } },
+];
+
+const MAP_MODES: { value: MapMode; label: string }[] = [
+  { value: "points", label: "점군 지도 (DLIO)" },
+  { value: "cad", label: "간이 CAD" },
+  { value: "both", label: "겹쳐 보기" },
+  { value: "none", label: "없음" },
 ];
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -148,6 +157,7 @@ export function Sidebar() {
 
   const byKind = (...kinds: TopicKind[]) => manifest.topics.filter((t) => kinds.includes(t.kind));
   const seriesTopics = byKind("series") as SeriesTopic[];
+  const hasCadPose = manifest.topics.some((t) => t.name === CAD_POSE_TOPIC);
 
   const setCamera = (slot: 0 | 1, v: string | null) => {
     const cameras = [...ui.cameras] as typeof ui.cameras;
@@ -170,7 +180,27 @@ export function Sidebar() {
               <TopicSelect value={ui.lidar} topics={byKind("pointcloud")} onChange={(v) => setUi({ lidar: v })} />
             </Field>
             <ToggleRow id="world" label="맵 좌표계 (DLIO 포즈)" checked={ui.worldView} onChange={(v) => setUi({ worldView: v })} />
-            <ToggleRow id="map" label="정적 점군 지도" checked={ui.showMap} disabled={!ui.worldView} onChange={(v) => setUi({ showMap: v })} />
+            <Field label="지도">
+              <Select value={ui.mapMode} onValueChange={(v) => setUi({ mapMode: v as MapMode })} disabled={!ui.worldView}>
+                <SelectTrigger size="sm" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent {...POPPER}>
+                  {MAP_MODES.map((m) => (
+                    <SelectItem key={m.value} value={m.value} disabled={m.value !== "points" && m.value !== "none" && !manifest.static.cad}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <ToggleRow
+              id="cad-pose"
+              label="CAD 위치 추정 마커"
+              checked={ui.showCadPose}
+              disabled={!ui.worldView || !hasCadPose}
+              onChange={(v) => setUi({ showCadPose: v })}
+            />
           </Section>
 
           <Separator />
@@ -203,7 +233,7 @@ export function Sidebar() {
                       </SelectTrigger>
                       <SelectContent {...POPPER} className="max-h-72">
                         {CHART_PRESETS.map((p, i) => (
-                          <SelectItem key={p.label} value={String(i)}>
+                          <SelectItem key={p.label} value={String(i)} disabled={!manifest.topics.some((t) => t.name === p.chart.topic)}>
                             {p.label}
                           </SelectItem>
                         ))}

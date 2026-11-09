@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PointCloudTopic, SeriesTopic } from "@grandtour/protocol";
 import { Badge } from "@/components/ui/badge";
 import { themeVarHex } from "@/lib/theme";
@@ -9,11 +10,22 @@ import { live, type SeriesBuffer } from "../data/live.ts";
 import { isDrawable, maxAgeFor, selectSample } from "../data/select.ts";
 import { TfTree } from "../data/tf.ts";
 import { SERVER_URL } from "../net/client.ts";
-import { WORLD_POSE_FRAME, WORLD_POSE_TOPIC, estimatePlayhead, useApp } from "../state.ts";
+import { CAD_POSE_TOPIC, WORLD_POSE_FRAME, WORLD_POSE_TOPIC, estimatePlayhead, useApp, type MapMode } from "../state.ts";
 import { Notice, Panel } from "./Panel.tsx";
 import { noticeText } from "./sampleStatus.ts";
 
 const MAX_TRAIL = 4000;
+/** CAD walls/ceilings above this height over the robot are cut away so they do not hide it. */
+const CAD_CLIP_ABOVE_ROBOT_M = 1.5;
+const POSE_COLUMNS = ["pose_pos.x", "pose_pos.y", "pose_pos.z", "pose_orien.qx", "pose_orien.qy", "pose_orien.qz", "pose_orien.qw"];
+
+type PoseColumns = { cols: number[]; offsets: number[] };
+
+function poseColumns(topic?: SeriesTopic): PoseColumns | null {
+  if (!topic) return null;
+  const cols = POSE_COLUMNS.map((n) => topic.columns.findIndex((c) => c.name === n));
+  return cols.every((i) => i >= 0) ? { cols, offsets: cols.map((i) => topic.columns[i].offset) } : null;
+}
 
 /**
  * Scene graph (ROS Z-up inside a root group rotated to three.js Y-up):
@@ -27,6 +39,9 @@ export function Viewer3D() {
   const tf = useMemo(() => (tfFile ? new TfTree(tfFile) : null), [tfFile]);
   const lidar = manifest.topics.find((t) => t.name === ui.lidar && t.kind === "pointcloud") as PointCloudTopic | undefined;
   const pose = manifest.topics.find((t) => t.name === WORLD_POSE_TOPIC) as SeriesTopic | undefined;
+  const cadPose = manifest.topics.find((t) => t.name === CAD_POSE_TOPIC) as SeriesTopic | undefined;
+  const showCadPose = ui.worldView && ui.showCadPose && !!cadPose;
+  const mapMode: MapMode = ui.worldView ? (manifest.static.cad ? ui.mapMode : ui.mapMode === "none" ? "none" : "points") : "none";
 
   const background = useMemo(() => themeVarHex("--card"), []);
 
@@ -57,32 +72,83 @@ export function Viewer3D() {
         const sel = selectSample(buf && i >= 0 ? buf.ts[i] : undefined, t, { hz: pose.hz, connected });
         if (!isDrawable(sel.state)) notes.push("해당 시점 포즈 없음: 점군과 로봇을 맵에 배치할 수 없습니다");
       }
+      if (connected && showCadPose && cadPose) {
+        const buf = live.series.get(cadPose.id);
+        const i = buf ? buf.indexAtOrBefore(t) : -1;
+        const sel = selectSample(buf && i >= 0 ? buf.ts[i] : undefined, t, { hz: cadPose.hz, connected });
+        const lostCol = cadPose.columns.findIndex((c) => c.name === "lost");
+        if (!isDrawable(sel.state)) notes.push("해당 시점 CAD 위치 추정 없음");
+        else if (buf && lostCol >= 0 && buf.row(i)[lostCol] > 0) notes.push("CAD 위치 추정 실패 구간: 오도메트리 예측만 표시");
+      }
       const text = notes.join(" · ");
       if (notice.current && notice.current.textContent !== text) notice.current.textContent = text;
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [lidar, pose, tf, ui.worldView]);
+  }, [lidar, pose, cadPose, showCadPose, tf, ui.worldView]);
 
   return (
     <Panel
       className="h-full"
       title={`3D · ${ui.worldView ? "DLIO 맵 좌표계" : "센서 박스(box_base) 좌표계"}`}
-      right={lidar && <Badge variant="secondary">{lidar.name}</Badge>}
+      right={
+        <div className="flex gap-1.5">
+          {showCadPose && (
+            <Badge variant="outline" className="gap-1.5 font-normal">
+              <span className="inline-block size-2 rounded-full bg-[#58a6ff]" />
+              DLIO
+              <span className="ml-1 inline-block size-2 rounded-full bg-[#ff9f43]" />
+              CAD 추정
+            </Badge>
+          )}
+          {lidar && <Badge variant="secondary">{lidar.name}</Badge>}
+        </div>
+      }
     >
       {/* remount per mode so the camera starts from a sensible viewpoint in each frame */}
-      <Canvas key={ui.worldView ? "world" : "sensor"} camera={{ position: ui.worldView ? [-8, 10, 8] : [-3, 3, 3], fov: 55, near: 0.05, far: 2000 }} dpr={[1, 2]}>
+      <Canvas
+        key={ui.worldView ? "world" : "sensor"}
+        camera={{ position: ui.worldView ? [-8, 10, 8] : [-3, 3, 3], fov: 55, near: 0.05, far: 2000 }}
+        dpr={[1, 2]}
+        gl={{ localClippingEnabled: true }}
+      >
         <color attach="background" args={[background]} />
-        <Scene lidar={lidar} pose={ui.worldView ? pose : undefined} showMap={ui.worldView && ui.showMap} tf={tf} />
+        <Scene
+          lidar={lidar}
+          pose={ui.worldView ? pose : undefined}
+          cadPose={showCadPose ? cadPose : undefined}
+          mapMode={mapMode}
+          cadFile={manifest.static.cad?.file}
+          tf={tf}
+        />
       </Canvas>
       <Notice ref={notice} />
     </Panel>
   );
 }
 
-function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: SeriesTopic; showMap: boolean; tf: TfTree | null }) {
+function Scene({
+  lidar,
+  pose,
+  cadPose,
+  mapMode,
+  cadFile,
+  tf,
+}: {
+  lidar?: PointCloudTopic;
+  pose?: SeriesTopic;
+  cadPose?: SeriesTopic;
+  mapMode: MapMode;
+  cadFile?: string;
+  tf: TfTree | null;
+}) {
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   const robot = useRef<THREE.Group>(null);
+  const cadRobot = useRef<THREE.Group>(null);
+  const cadRobotMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ff9f43", wireframe: true }), []);
+  const cadPoseMatrix = useMemo(() => new THREE.Matrix4(), []);
+  // three.js world is Y-up (after the root group's rotation); keep y <= robot height + margin.
+  const clip = useMemo(() => new THREE.Plane(new THREE.Vector3(0, -1, 0), Infinity), []);
   const scanGroup = useRef<THREE.Group>(null);
   const lastRobotPos = useRef<THREE.Vector3 | null>(null);
   const poseMatrix = useMemo(() => new THREE.Matrix4(), []);
@@ -96,13 +162,9 @@ function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: S
   }, [tf, lidar, pose]);
   const hesaiToBox = useMemo(() => (tf ? tf.relative(WORLD_POSE_FRAME, "box_base") : new THREE.Matrix4()), [tf]);
 
-  // pose columns
-  const poseCols = useMemo(() => {
-    if (!pose) return null;
-    const idx = (n: string) => pose.columns.findIndex((c) => c.name === n);
-    const cols = ["pose_pos.x", "pose_pos.y", "pose_pos.z", "pose_orien.qx", "pose_orien.qy", "pose_orien.qz", "pose_orien.qw"].map(idx);
-    return cols.every((i) => i >= 0) ? { cols, offsets: cols.map((i) => pose.columns[i].offset) } : null;
-  }, [pose]);
+  const poseCols = useMemo(() => poseColumns(pose), [pose]);
+  const cadCols = useMemo(() => poseColumns(cadPose), [cadPose]);
+  const cadLostCol = useMemo(() => cadPose?.columns.findIndex((c) => c.name === "lost") ?? -1, [cadPose]);
 
   const trailLine = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -142,10 +204,26 @@ function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: S
         trail.setDrawRange(0, 0);
       }
     }
+    // --- second marker: the same sensor pose, localized against the CAD model ---
+    if (cadRobot.current) {
+      const cbuf = cadPose ? live.series.get(cadPose.id) : undefined;
+      let show = false;
+      if (cadPose && cadCols && cbuf) {
+        const i = cbuf.indexAtOrBefore(t);
+        const sel = selectSample(i >= 0 ? cbuf.ts[i] : undefined, t, { hz: cadPose.hz, connected });
+        if (i >= 0 && isDrawable(sel.state) && poseAt(cbuf, cadCols, t, maxAgeFor(cadPose.hz), cadPoseMatrix)) {
+          show = true;
+          cadRobot.current.matrix.copy(cadPoseMatrix).multiply(hesaiToBox);
+          cadRobotMaterial.color.set(cadLostCol >= 0 && cbuf.row(i)[cadLostCol] > 0 ? "#f85149" : "#ff9f43");
+        }
+      }
+      cadRobot.current.visible = show;
+    }
     // --- robot marker (box_base) ---
     if (robot.current) {
       const m = pose ? (havePose ? poseMatrix.clone().multiply(hesaiToBox) : null) : new THREE.Matrix4();
       robot.current.visible = !!m;
+      clip.constant = m && pose ? m.elements[14] + CAD_CLIP_ABOVE_ROBOT_M : Infinity;
       if (m) {
         robot.current.matrix.copy(m);
         // keep the camera following the robot in world mode
@@ -193,13 +271,20 @@ function Scene({ lidar, pose, showMap, tf }: { lidar?: PointCloudTopic; pose?: S
       <ambientLight intensity={0.8} />
       <group rotation={[-Math.PI / 2, 0, 0]}>
         <gridHelper args={[100, 100, "#3a3a3a", "#262626"]} rotation={[Math.PI / 2, 0, 0]} />
-        {showMap && <StaticMap />}
+        {(mapMode === "points" || mapMode === "both") && <StaticMap />}
+        {(mapMode === "cad" || mapMode === "both") && cadFile && <CadMap file={cadFile} clip={clip} overlay={mapMode === "both"} />}
         {pose && <primitive object={trailLine} />}
         <group ref={robot} matrixAutoUpdate={false}>
           <axesHelper args={[0.8]} />
           <mesh>
             <boxGeometry args={[0.6, 0.35, 0.2]} />
             <meshBasicMaterial color="#58a6ff" wireframe />
+          </mesh>
+        </group>
+        <group ref={cadRobot} matrixAutoUpdate={false} visible={false}>
+          <axesHelper args={[0.5]} />
+          <mesh material={cadRobotMaterial}>
+            <boxGeometry args={[0.6, 0.35, 0.2]} />
           </mesh>
         </group>
         <group ref={scanGroup} matrixAutoUpdate={false}>
@@ -249,13 +334,64 @@ function StaticMap() {
 }
 
 /**
+ * Simple CAD model (static/cad.glb, Z-up metres in the DLIO map frame): translucent faces plus edges.
+ * Everything above the robot by CAD_CLIP_ABOVE_ROBOT_M is clipped so ceilings and walkways overhead
+ * do not hide it.
+ */
+function CadMap({ file, clip, overlay }: { file: string; clip: THREE.Plane; overlay: boolean }) {
+  const [model, setModel] = useState<THREE.Group | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let group: THREE.Group | null = null;
+    new GLTFLoader().load(`${SERVER_URL}/${file}`, (gltf) => {
+      if (!alive) return;
+      group = new THREE.Group();
+      // Walls are what pins the robot horizontally, so they stand out; floors and ceilings stay faint.
+      const style = (wall: boolean) => ({
+        faces: new THREE.MeshBasicMaterial({
+          color: wall ? "#9fb3c8" : "#6e7b88",
+          transparent: true,
+          opacity: (wall ? 0.22 : 0.07) * (overlay ? 0.6 : 1),
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          clippingPlanes: [clip],
+        }),
+        edges: new THREE.LineBasicMaterial({ color: wall ? "#c3d2e0" : "#7d8a97", transparent: true, opacity: wall ? 0.8 : 0.3, clippingPlanes: [clip] }),
+      });
+      const styles = { wall: style(true), slab: style(false) };
+      gltf.scene.updateMatrixWorld(true);
+      gltf.scene.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        const { faces, edges } = /wall/.test(o.name + (o.parent?.name ?? "")) ? styles.wall : styles.slab;
+        const geom = (o.geometry as THREE.BufferGeometry).clone().applyMatrix4(o.matrixWorld);
+        group!.add(new THREE.Mesh(geom, faces));
+        group!.add(new THREE.LineSegments(new THREE.EdgesGeometry(geom, 30), edges));
+      });
+      setModel(group);
+    });
+    return () => {
+      alive = false;
+      const materials = new Set<THREE.Material>();
+      group?.traverse((o) => {
+        if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+          o.geometry.dispose();
+          materials.add(o.material as THREE.Material);
+        }
+      });
+      materials.forEach((m) => m.dispose());
+    };
+  }, [file, clip, overlay]);
+  return model ? <primitive object={model} /> : null;
+}
+
+/**
  * Pose (T_map_hesai) at time t. Interpolates between the surrounding samples (lerp + slerp) when they
  * are close together; otherwise uses the last sample only if it is recent enough. Fails rather than
  * guessing: no placement is better than a scan drawn at the wrong place.
  */
 function poseAt(
   buf: SeriesBuffer,
-  pc: { cols: number[]; offsets: number[] },
+  pc: PoseColumns,
   t: number,
   maxGap: number,
   out: THREE.Matrix4,

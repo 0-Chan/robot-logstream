@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { send } from "./net/client.ts";
-import { WORLD_POSE_TOPIC, useApp } from "./state.ts";
+import { CAD_POSE_TOPIC, WORLD_POSE_TOPIC, useApp } from "./state.ts";
 import { CameraPanel } from "./ui/CameraPanel.tsx";
 import { ChartPanel } from "./ui/ChartPanel.tsx";
 import { PlaybackBar } from "./ui/PlaybackBar.tsx";
@@ -21,12 +21,13 @@ function useSubscriptions() {
     const names = new Set<string>();
     if (ui.lidar) names.add(ui.lidar);
     if (ui.worldView) names.add(WORLD_POSE_TOPIC);
+    if (ui.worldView && ui.showCadPose) names.add(CAD_POSE_TOPIC);
     ui.cameras.forEach((c) => c && names.add(c));
     ui.charts.forEach((c) => c && names.add(c.topic));
     const known = new Set(manifest.topics.map((t) => t.name));
     const topics: SubscribeTopic[] = [...names].filter((n) => known.has(n)).map((name) => ({ name }));
     send({ op: "subscribe", topics });
-  }, [manifest, ui.lidar, ui.worldView, ui.cameras, ui.charts]);
+  }, [manifest, ui.lidar, ui.worldView, ui.showCadPose, ui.cameras, ui.charts]);
 }
 
 export function App() {

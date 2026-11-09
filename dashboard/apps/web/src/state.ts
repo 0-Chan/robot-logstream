@@ -9,10 +9,15 @@ export interface ChartConfig {
   columns: string[];
 }
 
+export type MapMode = "points" | "cad" | "both" | "none";
+
 export interface UiState {
   lidar: string | null;
   worldView: boolean;
-  showMap: boolean;
+  /** Background map in world view: DLIO point cloud, the simple CAD model, both, or nothing. */
+  mapMode: MapMode;
+  /** Second robot marker: pose localized against the CAD model (preprocess `localize`). */
+  showCadPose: boolean;
   cameras: [string | null, string | null];
   charts: [ChartConfig | null, ChartConfig | null];
   chartWindowSec: number;
@@ -39,7 +44,8 @@ export const useApp = create<AppState>()((set) => ({
   ui: {
     lidar: "hesai_points",
     worldView: true,
-    showMap: true,
+    mapMode: "points",
+    showCadPose: false,
     cameras: ["hdr_front", "depth_camera_front_upper"],
     charts: [
       { topic: "anymal_state_state_estimator", columns: ["joint_positions.LF_HAA", "joint_positions.LF_HFE", "joint_positions.LF_KFE"] },
@@ -59,3 +65,5 @@ export function estimatePlayhead(): number {
 /** Pose topic used to place everything in the DLIO map frame (verified: pose of hesai_lidar). */
 export const WORLD_POSE_TOPIC = "dlio_map_odometry";
 export const WORLD_POSE_FRAME = "hesai_lidar";
+/** Derived topic: the same sensor pose, localized against the CAD model instead of by DLIO. */
+export const CAD_POSE_TOPIC = "cad_localization";
