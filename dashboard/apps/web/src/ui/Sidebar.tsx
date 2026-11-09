@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Logo } from "./Logo.tsx";
 import { CAD_POSE_TOPIC, useApp, type ChartConfig, type MapMode } from "../state.ts";
 
 const NONE = "__none__"; // Radix Select does not allow an empty-string item value
@@ -149,11 +150,29 @@ function ColumnPicker({ topic, selected, onChange }: { topic: SeriesTopic; selec
   );
 }
 
+/** Project name and mark; stays put while the settings below scroll. Same height as the playback bar. */
+function Brand() {
+  return (
+    <div className="flex h-14 shrink-0 items-center gap-2.5 border-b px-4">
+      <Logo />
+      <div className="flex min-w-0 flex-col leading-tight">
+        <span className="text-sm font-semibold">Robot Logstream</span>
+        <span className="truncate text-xs text-muted-foreground">보행 로봇 센서 기록 분석</span>
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const manifest = useApp((s) => s.manifest);
   const ui = useApp((s) => s.ui);
   const setUi = useApp((s) => s.setUi);
-  if (!manifest) return <aside className="border-r bg-card" />;
+  if (!manifest)
+    return (
+      <aside className="flex min-h-0 min-w-0 flex-col border-r bg-card">
+        <Brand />
+      </aside>
+    );
 
   const byKind = (...kinds: TopicKind[]) => manifest.topics.filter((t) => kinds.includes(t.kind));
   const seriesTopics = byKind("series") as SeriesTopic[];
@@ -171,9 +190,10 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="min-h-0 min-w-0 border-r bg-card">
+    <aside className="flex min-h-0 min-w-0 flex-col border-r bg-card">
+      <Brand />
       {/* Radix wraps content in a display:table div that grows with content; force block so it fits the sidebar */}
-      <ScrollArea className="h-full [&_[data-slot=scroll-area-viewport]>div]:!block">
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
         <div className="flex flex-col gap-5 p-4">
           <Section title="3D 뷰">
             <Field label="LiDAR">

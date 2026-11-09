@@ -55,8 +55,8 @@ export function PlaybackBar() {
   return (
     <footer className="col-span-2 flex h-14 items-center gap-3 border-t bg-card px-4">
       <div className="flex min-w-0 flex-col leading-tight">
-        <span className="text-sm font-semibold">GrandTour Playback</span>
-        <span className="truncate text-xs text-muted-foreground">{manifest?.sequence ?? "—"}</span>
+        <span className="text-xs text-muted-foreground">시퀀스</span>
+        <span className="truncate text-sm font-medium tabular-nums">{manifest?.sequence ?? "—"}</span>
       </div>
       <Tooltip>
         <TooltipTrigger asChild>
