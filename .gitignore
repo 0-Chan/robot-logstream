@@ -19,6 +19,7 @@ __pycache__/
 *.tfstate
 *.tfstate.*
 *.tfvars
+tfplan
 # Deployment secrets
 deploy/.env
 # Transfer count kept by the server (local compose test)

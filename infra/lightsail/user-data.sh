@@ -1,6 +1,7 @@
-#!/bin/bash
-# Runs once at first boot (Lightsail launch script, as root).
-set -euxo pipefail
+#!/bin/sh
+# Runs once at first boot, as root. Lightsail appends this to its own launch script and runs it with
+# /bin/sh (dash), whatever the shebang says: keep it POSIX (no pipefail, no [[ ]]).
+set -eux
 
 apt-get update
 apt-get install -y docker.io docker-compose-v2 rsync
