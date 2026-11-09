@@ -72,3 +72,7 @@ series:
   navsatfix_cpt7_ie_tc: {}
   gnss_raw_cpt7_ie_tc: {}
   gnss_raw_cpt7_ie_rt: {}
+
+# Topics computed from the prepared data by later commands, not read from the raw sequence.
+derived:
+  - cad_localization   # uv run localize (needs static/cad.glb from cad-extract + cad-build)

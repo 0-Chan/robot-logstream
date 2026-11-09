@@ -110,6 +110,22 @@ def check_images(meta, tdir, src, rng, samples) -> list[str]:
     return errs
 
 
+def check_derived(meta: dict, tdir: Path) -> list[str]:
+    """Computed topics have no raw tar: check only that the files match the manifest entry."""
+    ts = np.fromfile(tdir / "timestamps.f64", "<f8")
+    vals = np.fromfile(tdir / "values.f32", "<f4")
+    errs = []
+    if len(ts) != meta["count"]:
+        errs.append(f"{len(ts)} timestamps, manifest says {meta['count']}")
+    if np.any(np.diff(ts) <= 0):
+        errs.append("timestamps not strictly increasing")
+    if vals.size != len(ts) * len(meta["columns"]):
+        errs.append(f"values.f32 has {vals.size} floats, expected {len(ts)} x {len(meta['columns'])}")
+    elif not np.isfinite(vals).all():
+        errs.append("non-finite values")
+    return errs
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--src", required=True, type=Path)
@@ -123,6 +139,13 @@ def main(argv=None):
     failed = 0
     for meta in manifest["topics"]:
         tdir = out / meta["dir"]
+        if meta.get("derived"):
+            errs = check_derived(meta, tdir)
+            failed += bool(errs)
+            print(f"{'ok' if not errs else 'FAIL':4s} {meta['name']:32s} {'derived':10s} n={meta['count']}")
+            for e in errs[:5]:
+                print(f"       - {e}")
+            continue
         with TarZarrGroup(src / "data" / f"{meta['name']}.tar") as g:
             errs = check_timestamps(meta, tdir, g)
             if meta["kind"] == "pointcloud":

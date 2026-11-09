@@ -29,6 +29,8 @@ def load_jobs(config: dict) -> list[tuple[str, str, dict]]:
     for kind in ("pointcloud", "image", "depth"):
         jobs += [(t, kind, {}) for t in config.get(kind) or []]
     jobs += [(t, "series", opts or {}) for t, opts in (config.get("series") or {}).items()]
+    # Produced by later steps (e.g. `uv run localize`); listed here so their topic ids stay stable.
+    jobs += [(t, "derived", {}) for t in config.get("derived") or []]
     return jobs
 
 
@@ -44,7 +46,23 @@ def run_job(src: str, out: str, topic: str, kind: str, opts: dict, defaults: dic
     return topic, time.time() - start
 
 
-def write_manifest(src: Path, out: Path, jobs, static_info: dict):
+def static_info(out: Path) -> dict:
+    info = {"tf": "static/tf.json"}
+    if (out / "static" / "map.json").exists():
+        info["map"] = json.loads((out / "static" / "map.json").read_text())
+        info["map"]["file"] = "static/map.bin"
+    if (out / "static" / "cad.json").exists():
+        info["cad"] = json.loads((out / "static" / "cad.json").read_text())
+    return info
+
+
+def rebuild_manifest(out: Path, config_path: Path = DEFAULT_CONFIG) -> dict:
+    """Re-read every finished topic and static asset; used after cad-build / localize."""
+    jobs = load_jobs(yaml.safe_load(config_path.read_text()))
+    return write_manifest(out.name, out, jobs, static_info(out))
+
+
+def write_manifest(sequence: str, out: Path, jobs, static_info: dict):
     topics = []
     for topic_id, (topic, kind, _) in enumerate(jobs):
         meta_path = out / "topics" / topic / META_FILE
@@ -58,7 +76,7 @@ def write_manifest(src: Path, out: Path, jobs, static_info: dict):
     t1 = max(m["t1"] for m in topics if m["t1"] is not None)
     manifest = {
         "layoutVersion": PROTOCOL_LAYOUT_VERSION,
-        "sequence": src.name,
+        "sequence": sequence,
         "t0": t0,
         "t1": t1,
         "quaternionOrder": "xyzw",
@@ -96,7 +114,7 @@ def main(argv=None):
 
     todo = []
     for topic, kind, opts in jobs:
-        if selected and topic not in selected:
+        if kind == "derived" or (selected and topic not in selected):
             continue
         done = (out / "topics" / topic / META_FILE).exists()
         if done and not args.force:
@@ -119,18 +137,13 @@ def main(argv=None):
                 failed.append(topic)
                 print(f"  [{i}/{len(todo)}] {topic} FAILED\n{traceback.format_exc()}", flush=True)
 
-    static_info = {"tf": "static/tf.json"}
     print(f"  tf frames: {write_tf(src, out / 'static')}")
     map_path = out / "static" / "map.bin"
     if not map_path.exists() or args.force:
         info = write_map(src, out / "static")
         if info:
             (out / "static" / "map.json").write_text(json.dumps(info, indent=1))
-    if (out / "static" / "map.json").exists():
-        static_info["map"] = json.loads((out / "static" / "map.json").read_text())
-        static_info["map"]["file"] = "static/map.bin"
-
-    manifest = write_manifest(src, out, jobs, static_info)
+    manifest = write_manifest(src.name, out, jobs, static_info(out))
     print(f"manifest: {len(manifest['topics'])} topics, {manifest['t1'] - manifest['t0']:.1f}s")
     if failed:
         sys.exit(f"failed topics: {failed}")
