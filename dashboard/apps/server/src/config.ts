@@ -18,4 +18,14 @@ export const config = {
   defaultSeriesHz: 100,
   /** Series history sent after seek / new subscription. */
   backfillSeconds: 5,
+  /** Outbound transfer included in the hosting plan (Lightsail small_3_0: 3 TB). Alerts only, never blocks. */
+  transferAllowanceGb: Number(process.env.TRANSFER_ALLOWANCE_GB ?? 3000),
+  /** Alert when the last hour alone sent more than this (~3 viewers watching for a full hour). */
+  spikeGbPerHour: Number(process.env.SPIKE_GB_PER_HOUR ?? 50),
+  /** Price per GB above the allowance (Lightsail Seoul), for the projected-cost line in alerts. */
+  overageUsdPerGb: Number(process.env.OVERAGE_USD_PER_GB ?? 0.13),
+  /** Where the month's count is kept across restarts; unset = memory only (local dev). */
+  transferStateFile: process.env.TRANSFER_STATE_FILE || null,
+  /** Send one test alert at startup to check the channel settings. */
+  notifyTest: process.env.NOTIFY_TEST === "1",
 };

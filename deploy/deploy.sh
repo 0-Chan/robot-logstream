@@ -33,14 +33,33 @@ if ! ssh "$REMOTE" "test -f $APP_DIR/.env"; then
   echo "== first deploy: create $APP_DIR/.env on the server"
   site_default="${HOST//./-}.sslip.io"
   read -rp "site address [$site_default]: " site
-  ssh "$REMOTE" "umask 077 && cat > $APP_DIR/.env" <<EOF
+  echo "Transfer alert channels (Enter to skip each; see deploy/.env.example):"
+  read -rsp "  Slack webhook URL: " slack; echo
+  read -rsp "  Discord webhook URL: " discord; echo
+  read -rsp "  ntfy topic URL (e.g. https://ntfy.sh/<hard-to-guess>): " ntfy; echo
+  read -rsp "  SMTP URL for e-mail (e.g. smtps://you%40gmail.com:app-password@smtp.gmail.com:465): " smtp; echo
+  email_to=""
+  [[ -n "$smtp" ]] && read -rp "  alert e-mail recipients (comma separated): " email_to
+  ssh "$REMOTE" "umask 077 && mkdir -p $APP_DIR/state && cat > $APP_DIR/.env" <<EOF
 SITE_ADDRESS=${site:-$site_default}
 SEQUENCE=$SEQUENCE
 DATA_DIR=./data
+TRANSFER_ALLOWANCE_GB=3000
+SPIKE_GB_PER_HOUR=50
+OVERAGE_USD_PER_GB=0.13
+NOTIFY_TEST=1
+SLACK_WEBHOOK_URL=$slack
+DISCORD_WEBHOOK_URL=$discord
+NTFY_TOPIC_URL=$ntfy
+ALERT_WEBHOOK_URL=
+SMTP_URL=$smtp
+ALERT_EMAIL_TO=$email_to
+ALERT_EMAIL_FROM=
 EOF
+  echo "   NOTIFY_TEST=1: the first start sends a test alert to every channel. Set it empty in $APP_DIR/.env afterwards."
 fi
 
 echo "== start"
-ssh "$REMOTE" "cd $APP_DIR && docker compose up -d && docker compose ps"
+ssh "$REMOTE" "mkdir -p $APP_DIR/state && cd $APP_DIR && docker compose up -d && docker compose ps"
 site=$(ssh "$REMOTE" "grep ^SITE_ADDRESS= $APP_DIR/.env | cut -d= -f2")
 echo "done: https://$site"

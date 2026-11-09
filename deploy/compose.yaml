@@ -4,10 +4,13 @@ services:
   server:
     image: robot-logstream-server:latest
     restart: unless-stopped
+    env_file: .env # alert channels and transfer settings (see .env.example)
     environment:
       PREPARED_DIR: /data/prepared/${SEQUENCE}
+      TRANSFER_STATE_FILE: /state/transfer.json
     volumes:
       - ${DATA_DIR:-./data}/prepared:/data/prepared:ro
+      - ./state:/state # this month's transfer count survives restarts
 
   web:
     image: robot-logstream-web:latest

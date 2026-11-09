@@ -2,3 +2,6 @@
 ssh_public_key_path = "~/.ssh/id_ed25519.pub"
 ssh_allowed_cidrs   = ["203.0.113.7/32"] # your IP: curl -s https://checkip.amazonaws.com
 # bundle_id         = "small_3_0"        # 2 GB / 60 GB / 3 TB
+# AWS cost alerts (e-mail, no confirmation needed). Leave empty to skip.
+# alert_emails     = ["you@example.com"]
+# budget_limit_usd = 15

@@ -267,6 +267,25 @@ dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 �
 
 **주의**
 - 공개 사이트라 누구나 재생할 수 있습니다. 시청 1시간에 약 18 GB를 보내므로, 포함 송신량(3 TB, 시청 약 165시간)을 넘으면 GB당 USD 0.13가 과금됩니다. 접근을 막아야 하면 `Caddyfile`에 `basic_auth`를 넣거나 Cloudflare Access를 앞에 두세요.
+
+### 송신량 알림 (재생은 막지 않음)
+
+공개 사이트라서 송신량이 포함량을 넘기 전에 알림을 받도록 했습니다. 재생은 어떤 경우에도 막지 않습니다.
+
+| 경로 | 무엇을 보나 | 언제 알리나 | 받는 곳 |
+|---|---|---|---|
+| **서버 알림**(1차) | 서버가 직접 센 이번 달 송신량(WebSocket + `/static`) | 포함량의 50·80·95·100%, 이후 10%p마다. 최근 1시간이 `SPIKE_GB_PER_HOUR`를 넘으면 '급증'(6시간에 한 번) | 서버 로그(항상), Slack, Discord, ntfy(휴대폰 푸시), 범용 웹훅, 이메일(SMTP) |
+| **AWS Budgets**(2차 안전망) | Lightsail 청구 금액 | 예산의 80%·100%, 예상 금액 100% 초과 | 이메일(`alert_emails`), 선택적으로 SNS |
+
+- **채널 설정:** 서버의 `/srv/robot-logstream/.env`(설명은 `deploy/.env.example`). `deploy.sh`가 첫 배포 때 각 URL을 묻습니다. 빈칸으로 두면 그 채널은 쓰지 않습니다.
+  - **이메일:** `SMTP_URL`(예: Gmail 앱 비밀번호 `smtps://you%40gmail.com:app-password@smtp.gmail.com:465`)과 `ALERT_EMAIL_TO`를 넣습니다. 비밀번호에 `$`가 있으면 compose가 변수로 해석하므로 `$$`로 적으세요.
+  - **휴대폰 푸시:** ntfy 앱에서 추측하기 어려운 토픽을 구독하고, 그 주소를 `NTFY_TOPIC_URL`에 넣습니다.
+- **설정 확인:** `NOTIFY_TEST=1`이면 서버가 시작할 때 모든 채널로 시험 알림을 보냅니다. 첫 배포에서는 켜져 있으니, 확인한 뒤 비우고 `docker compose up -d`를 다시 실행하세요.
+- **현재 사용량:** `curl https://<주소>/health`의 `transfer` 항목(이번 달 GB, %, 최근 1시간, 월말 예상, 초과 예상 비용)
+- 이번 달 집계는 `state/transfer.json`에 저장되어 재시작해도 이어지고, 같은 알림을 다시 보내지 않습니다.
+- 서버가 세지 못하는 몫(Caddy가 직접 주는 화면 파일, TLS 오버헤드)이 있어서 실제 송신량은 조금 더 많습니다. 80% 알림을 실질적인 경고로 보세요.
+- 인스턴스 플랜(`bundle_id`)을 바꾸면 `TRANSFER_ALLOWANCE_GB`도 새 포함량으로 바꾸세요.
+- AWS 비용 데이터는 몇 시간에서 하루 늦게 반영되므로 Budgets는 안전망입니다. `terraform.tfvars`에 `alert_emails = ["you@example.com"]`을 넣으면 만들어집니다.
 - 웹 빌드에서 `VITE_SERVER_URL`을 빈 값으로 두면 같은 출처를, 설정하지 않으면 `http://localhost:8787`(개발)을 씁니다.
 
 ## 새 토픽이나 새 시퀀스 추가

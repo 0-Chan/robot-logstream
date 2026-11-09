@@ -19,6 +19,7 @@ variable "bundle_id" {
   description = <<-EOT
     Instance plan. small_3_0 = 2 GB RAM, 60 GB SSD, 3 TB transfer (USD 12/month at the time of writing).
     The server holds ~150 MB of series in memory and needs ~11 GB of disk for one sequence.
+    Changing it? Set TRANSFER_ALLOWANCE_GB in the server .env to the new plan's transfer, too.
     List plans: aws lightsail get-bundles --region ap-northeast-2
   EOT
   type        = string
