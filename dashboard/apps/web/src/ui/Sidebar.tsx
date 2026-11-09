@@ -11,7 +11,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Logo } from "./Logo.tsx";
 import { CAD_POSE_TOPIC, useApp, type ChartConfig, type MapMode } from "../state.ts";
 
 const NONE = "__none__"; // Radix Select does not allow an empty-string item value
@@ -154,7 +153,7 @@ function ColumnPicker({ topic, selected, onChange }: { topic: SeriesTopic; selec
 function Brand() {
   return (
     <div className="flex h-14 shrink-0 items-center gap-2.5 border-b px-4">
-      <Logo />
+      <img src="/logo.png" alt="" className="size-7 shrink-0 rounded-md" />
       <div className="flex min-w-0 flex-col leading-tight">
         <span className="text-sm font-semibold">Robot Logstream</span>
         <span className="truncate text-xs text-muted-foreground">보행 로봇 센서 기록 분석</span>
