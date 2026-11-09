@@ -1,0 +1,28 @@
+# Runs on the server in /srv/robot-logstream (deploy.sh copies this file there), or locally for a test:
+#   cp deploy/.env.example deploy/.env  (edit), then from deploy/: docker compose up
+services:
+  server:
+    image: robot-logstream-server:latest
+    restart: unless-stopped
+    environment:
+      PREPARED_DIR: /data/prepared/${SEQUENCE}
+    volumes:
+      - ${DATA_DIR:-./data}/prepared:/data/prepared:ro
+
+  web:
+    image: robot-logstream-web:latest
+    restart: unless-stopped
+    depends_on: [server]
+    env_file: .env
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

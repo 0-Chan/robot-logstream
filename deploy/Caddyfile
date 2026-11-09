@@ -1,0 +1,21 @@
+# One origin for the page and the server: no CORS, and wss:// comes with the HTTPS certificate.
+# SITE_ADDRESS, AUTH_USER, AUTH_HASH come from .env (see .env.example).
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The app has no login of its own; keep the whole site behind basic auth.
+	basic_auth {
+		{$AUTH_USER} {$AUTH_HASH}
+	}
+
+	@server path /ws /health /manifest.json /static/*
+	handle @server {
+		reverse_proxy server:8787
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

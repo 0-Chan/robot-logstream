@@ -13,3 +13,11 @@ __pycache__/
 *.pyc
 
 .DS_Store
+
+# Terraform state and local settings (state can contain sensitive values)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+# Deployment secrets
+deploy/.env

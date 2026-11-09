@@ -8,7 +8,9 @@ import { live } from "../data/live.ts";
 import { estimatePlayhead, useApp } from "../state.ts";
 import type { FromWorker, ToWorker } from "./messages.ts";
 
-export const SERVER_URL = (import.meta.env.VITE_SERVER_URL as string | undefined) ?? "http://localhost:8787";
+// Unset: local dev server. Empty string: same origin (deployed behind Caddy, see deploy/).
+const configuredServer = import.meta.env.VITE_SERVER_URL as string | undefined;
+export const SERVER_URL = configuredServer === undefined ? "http://localhost:8787" : configuredServer || location.origin;
 
 const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
 const toWorker = (m: ToWorker) => worker.postMessage(m);

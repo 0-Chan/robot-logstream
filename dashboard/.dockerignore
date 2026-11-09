@@ -1,0 +1,4 @@
+**/node_modules
+**/dist
+preprocess
+**/.DS_Store

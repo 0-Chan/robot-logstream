@@ -230,6 +230,46 @@ uv run localize    --prepared $P   # 스캔 × CAD → topics/cad_localization (
 - `lost` 판정 기준(fitness, rmse, 보정량)은 이 시퀀스에서 한 번도 걸리지 않았습니다. 실제로 실패를 잡아내는지는 아직 확인하지 못했습니다.
 - 실제 현장 CAD를 쓰려면 STEP을 GLB로 바꾸고, `dlio_map`(또는 로봇 지도)과 CAD 좌표 사이의 변환을 먼저 구해야 합니다.
 
+## 배포 (AWS Lightsail)
+
+서울 리전 Lightsail 인스턴스 한 대에 Docker로 **Node 서버 + Caddy**를 띄웁니다. Caddy가 HTTPS 인증서 발급, 프론트 정적 파일 제공, `/ws` 프록시, 기본 인증을 맡습니다. 페이지와 서버가 같은 도메인이라 CORS 설정이 필요 없습니다.
+
+```
+infra/lightsail/   Terraform: 인스턴스(기본 small_3_0: 2 GB, 60 GB, 3 TB), 고정 IP, 방화벽(22/80/443), SSH 키
+deploy/            compose.yaml, Caddyfile, .env.example, deploy.sh
+dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 프론트)
+```
+
+1. **인프라 만들기** (AWS 자격 증명 필요, 월 약 USD 12 과금 시작)
+   ```bash
+   aws login
+   cd infra/lightsail
+   cp terraform.tfvars.example terraform.tfvars   # SSH 공개키 경로, SSH 허용 IP
+   terraform init && terraform plan && terraform apply
+   terraform output                               # public_ip, site_address, deploy 명령
+   ```
+   - 첫 부팅 때 `user-data.sh`가 Docker, swap 2 GB, `/srv/robot-logstream`을 준비합니다. 1~2분 기다린 뒤 다음 단계로 넘어가세요.
+2. **배포** (저장소 루트에서)
+   ```bash
+   deploy/deploy.sh <public_ip>
+   ```
+   - 이미지를 linux/amd64로 빌드해 ssh로 보냅니다. 레지스트리는 필요 없습니다.
+   - `data/prepared/<시퀀스>`를 rsync로 올립니다. 첫 업로드는 약 11 GB입니다.
+   - 첫 배포라면 사이트 주소(기본 `<ip>.sslip.io`)와 기본 인증 사용자·비밀번호를 묻습니다. 서버에는 비밀번호의 bcrypt 해시만 `.env`로 저장합니다.
+   - 코드만 다시 배포할 때는 `SKIP_DATA=1 deploy/deploy.sh <ip>`를 씁니다.
+3. **도메인이 있다면** A 레코드를 고정 IP로 연결하고, 서버의 `/srv/robot-logstream/.env`에서 `SITE_ADDRESS`를 바꾼 뒤 `docker compose up -d`를 실행합니다.
+4. **삭제:** `terraform destroy`. 고정 IP도 함께 해제됩니다. 인스턴스에서 떼어 둔 고정 IP는 과금됩니다.
+
+**로컬에서 같은 구성으로 시험하기:** `deploy/.env.example`을 `deploy/.env`로 복사하고 다음을 설정합니다.
+- `SITE_ADDRESS=:80`, `DATA_DIR=../data`, `HTTP_PORT=8080`
+- `AUTH_HASH`: `docker run --rm -it caddy:2.10-alpine caddy hash-password`로 만든 값
+
+그다음 `dashboard`에서 `docker buildx build --target server -t robot-logstream-server:latest --load .`와 같은 명령을 web 타깃에도 실행합니다. 마지막으로 `deploy`에서 `docker compose up`을 실행합니다.
+
+**주의**
+- 기본 인증은 공유 계정 하나입니다. 사람별 접근 관리가 필요하면 Cloudflare Access 등을 앞에 두세요.
+- 웹 빌드에서 `VITE_SERVER_URL`을 빈 값으로 두면 같은 출처를, 설정하지 않으면 `http://localhost:8787`(개발)을 씁니다.
+
 ## 새 토픽이나 새 시퀀스 추가
 
 1. **새 시퀀스:** `data/raw/<새 시퀀스>`에 받은 뒤 `uv run prep --src ../../data/raw/<새 시퀀스>`, 그리고 `PREPARED_DIR=.../data/prepared/<새 시퀀스> pnpm --filter @grandtour/server dev`
