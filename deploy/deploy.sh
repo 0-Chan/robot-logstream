@@ -12,7 +12,6 @@ SEQUENCE=${SEQUENCE:-2024-11-02-17-10-25}
 REMOTE=ubuntu@$HOST
 APP_DIR=/srv/robot-logstream
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-CADDY_IMAGE=caddy:2.10-alpine
 
 echo "== build images (linux/amd64: Lightsail instances are x86_64)"
 for target in server web; do
@@ -34,13 +33,8 @@ if ! ssh "$REMOTE" "test -f $APP_DIR/.env"; then
   echo "== first deploy: create $APP_DIR/.env on the server"
   site_default="${HOST//./-}.sslip.io"
   read -rp "site address [$site_default]: " site
-  read -rp "basic auth user [reviewer]: " user
-  echo "Type the basic auth password twice (it is hashed by caddy; only the hash is stored):"
-  hash=$(docker run --rm -it "$CADDY_IMAGE" caddy hash-password | tr -d '\r' | tail -n1)
   ssh "$REMOTE" "umask 077 && cat > $APP_DIR/.env" <<EOF
 SITE_ADDRESS=${site:-$site_default}
-AUTH_USER=${user:-reviewer}
-AUTH_HASH='$hash'
 SEQUENCE=$SEQUENCE
 DATA_DIR=./data
 EOF
