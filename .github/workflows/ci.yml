@@ -1,0 +1,61 @@
+# Checks only (no deploy): typecheck, tests and the web build for the dashboard, pytest for the preprocessor.
+# Nothing here needs data/ (the dataset is not in the repo).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    name: dashboard (typecheck, test, build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: dashboard/package.json # pnpm version from "packageManager"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24 # same as the Docker image
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: build web
+        run: pnpm --filter @grandtour/web build
+        env:
+          VITE_SERVER_URL: "" # same-origin build, as in deploy
+
+  preprocess:
+    name: preprocess (pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: dashboard/preprocess
+    steps:
+      - uses: actions/checkout@v5
+      # open3d and cadquery (OCP) load libGL/libEGL at import even without a display.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libegl1 libgomp1
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: dashboard/preprocess/uv.lock
+      - run: uv sync --locked
+      - run: uv run pytest -q
