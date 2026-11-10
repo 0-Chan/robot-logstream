@@ -29,9 +29,26 @@ export function noticeText(sel: Selection, ctx: StatusContext): string {
   }
 }
 
-/** Short label for the sample-age badge. */
-export function ageText(sel: Selection): string {
-  if (Number.isNaN(sel.age) || sel.state === "none" || sel.state === "future") return "샘플 없음";
-  if (sel.state === "stale") return `이전 샘플 ${secs(sel.age)} 전`;
-  return `샘플 경과 ${secs(Math.max(0, sel.age))}`;
+export type DotState = "ok" | "stale" | "off" | "none";
+
+/** Color key for the status dot in the rate badge. */
+export function dotState(sel: Selection): DotState {
+  switch (sel.state) {
+    case "ok":
+      return "ok";
+    case "stale":
+      return "stale";
+    case "disconnected":
+      return "off";
+    case "none":
+    case "future":
+      return "none";
+  }
+}
+
+/** Label next to the status dot: measured frames per second. */
+export function rateText(fps: number, sel: Selection, playing: boolean): string {
+  if (sel.state === "none" || sel.state === "future") return "샘플 없음";
+  if (!playing) return "일시정지";
+  return `${fps} fps`;
 }
