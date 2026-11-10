@@ -21,7 +21,9 @@ RUN pnpm install --frozen-lockfile --filter @grandtour/server...
 COPY packages/protocol packages/protocol
 COPY apps/server apps/server
 WORKDIR /app/apps/server
-ENV NODE_ENV=production PORT=8787
+# Commit the image was built from; /health reports it so CI can tell when the server runs it.
+ARG GIT_SHA=dev
+ENV NODE_ENV=production PORT=8787 APP_VERSION=$GIT_SHA
 EXPOSE 8787
 CMD ["./node_modules/.bin/tsx", "src/index.ts"]
 

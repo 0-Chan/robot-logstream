@@ -53,7 +53,7 @@ app.use("*", async (c, next) => {
   meter.add(Number(c.res.headers.get("content-length") ?? 0));
 });
 
-app.get("/health", (c) => c.json({ ok: true, sequence: manifest.sequence, sessions, transfer: meter.usage() }));
+app.get("/health", (c) => c.json({ ok: true, version: config.version, sequence: manifest.sequence, sessions, transfer: meter.usage() }));
 
 // Static, non-streaming assets (manifest, tf tree, map) over plain HTTP.
 const staticRoot = path.relative(process.cwd(), config.preparedDir) || ".";

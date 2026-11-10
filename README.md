@@ -236,7 +236,8 @@ uv run localize    --prepared $P   # 스캔 × CAD → topics/cad_localization (
 
 ```
 infra/lightsail/   Terraform: 인스턴스(기본 small_3_0: 2 GB, 60 GB, 3 TB), 고정 IP, 방화벽(22/80/443), SSH 키
-deploy/            compose.yaml, Caddyfile, .env.example, deploy.sh
+deploy/            compose.yaml, Caddyfile, .env.example, deploy.sh, updater/(1분 주기 이미지 갱신 타이머)
+.github/workflows/ci.yml  검사 → GHCR 이미지 push → 서버 반영 확인
 dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 프론트)
 ```
 
@@ -249,21 +250,30 @@ dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 �
    terraform output                               # public_ip, site_address, deploy 명령
    ```
    - 첫 부팅 때 `user-data.sh`가 Docker, swap 2 GB, `/srv/robot-logstream`을 준비합니다. 1~2분 기다린 뒤 다음 단계로 넘어가세요.
-2. **배포** (저장소 루트에서)
+2. **서버 준비** (저장소 루트에서, 처음 한 번)
    ```bash
    deploy/deploy.sh <public_ip>
    ```
-   - 이미지를 linux/amd64로 빌드해 ssh로 보냅니다. 레지스트리는 필요 없습니다.
    - `data/prepared/<시퀀스>`를 rsync로 올립니다. 첫 업로드는 약 11 GB입니다.
-   - 첫 배포라면 사이트 주소(기본 `<ip>.sslip.io`)를 묻고 서버의 `.env`에 저장합니다.
-   - 코드만 다시 배포할 때는 `SKIP_DATA=1 deploy/deploy.sh <ip>`를 씁니다.
-3. **도메인이 있다면** A 레코드를 고정 IP로 연결하고, 서버의 `/srv/robot-logstream/.env`에서 `SITE_ADDRESS`를 바꾼 뒤 `docker compose up -d`를 실행합니다.
-4. **삭제:** `terraform destroy`. 고정 IP도 함께 해제됩니다. 인스턴스에서 떼어 둔 고정 IP는 과금됩니다.
+   - 첫 실행이라면 사이트 주소(기본 `<ip>.sslip.io`)와 알림 채널을 묻고 서버의 `.env`에 저장합니다.
+   - compose.yaml, Caddyfile, 갱신 타이머를 설치하고 GHCR에서 이미지를 받아 시작합니다.
+   - 데이터, compose.yaml, Caddyfile이 바뀌었을 때만 다시 실행합니다(데이터가 그대로면 `SKIP_DATA=1`).
+3. **코드 배포는 자동입니다.** main에 push하면:
+   - CI가 검사를 통과한 뒤 `ghcr.io/0-chan/robot-logstream-{server,web}`에 `<커밋 sha>`와 `latest` 태그로 이미지를 올립니다.
+   - 서버의 `robot-logstream-update.timer`가 1분마다 새 이미지를 확인하고, 바뀐 컨테이너만 교체합니다. 교체 순간 접속이 몇 초 끊깁니다.
+   - CI의 deploy job이 `/health`의 `version`이 그 커밋 sha가 될 때까지 기다려 성공 여부를 표시합니다. 대상 주소는 repo variable `DEPLOY_URL`이고, 비어 있으면(서버를 내렸을 때) 건너뜁니다.
+   - GitHub에서 서버로 들어가는 접속은 없습니다. SSH는 계속 내 IP에서만 열려 있습니다.
+   - **되돌리기:** 서버 `/srv/robot-logstream/.env`에 `IMAGE_TAG=<이전 sha>`를 넣으면 1분 안에 그 버전으로 바뀌고 고정됩니다. 비우면 다시 main을 따라갑니다.
+   - **로그:** `journalctl -u robot-logstream-update -n 50`
+   - 처음 한 번: GHCR 패키지 두 개를 Public으로 바꿔야 서버가 로그인 없이 받을 수 있습니다(GitHub → Packages → Package settings).
+4. **도메인이 있다면** A 레코드를 고정 IP로 연결하고, 서버의 `/srv/robot-logstream/.env`에서 `SITE_ADDRESS`를 바꾼 뒤 `docker compose up -d`를 실행합니다.
+5. **삭제:** `terraform destroy`. 그다음 repo variable `DEPLOY_URL`을 비웁니다. 고정 IP도 함께 해제됩니다. 인스턴스에서 떼어 둔 고정 IP는 과금됩니다.
 
 **로컬에서 같은 구성으로 시험하기:** `deploy/.env.example`을 `deploy/.env`로 복사하고 다음을 설정합니다.
 - `SITE_ADDRESS=:80`, `DATA_DIR=../data`, `HTTP_PORT=8080`
+- GHCR 이미지 대신 직접 빌드한 이미지를 쓰려면 `IMAGE_TAG=dev`
 
-그다음 `dashboard`에서 `docker buildx build --target server -t robot-logstream-server:latest --load .`와 같은 명령을 web 타깃에도 실행합니다. 마지막으로 `deploy`에서 `docker compose up`을 실행합니다.
+그다음 `dashboard`에서 `docker buildx build --target server -t ghcr.io/0-chan/robot-logstream-server:dev --load .`와 같은 명령을 web 타깃에도 실행합니다. 마지막으로 `deploy`에서 `docker compose up`을 실행합니다.
 
 **주의**
 - 공개 사이트라 누구나 재생할 수 있습니다. 시청 1시간에 약 18 GB를 보내므로, 포함 송신량(3 TB, 시청 약 165시간)을 넘으면 GB당 USD 0.13가 과금됩니다. 접근을 막아야 하면 `Caddyfile`에 `basic_auth`를 넣거나 Cloudflare Access를 앞에 두세요.

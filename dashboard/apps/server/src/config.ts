@@ -8,6 +8,8 @@ export const config = {
   /** prepared/<sequence> directory produced by `uv run prep`. */
   preparedDir: path.resolve(process.env.PREPARED_DIR ?? path.join(repoRoot, "data/prepared/2024-11-02-17-10-25")),
   port: Number(process.env.PORT ?? 8787),
+  /** Commit of the running image (set at build time), reported by /health. */
+  version: process.env.APP_VERSION || "dev",
   /** Playback loop period. */
   tickMs: 20,
   /** Clock broadcast period. */

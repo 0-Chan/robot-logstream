@@ -1,8 +1,9 @@
 # Runs on the server in /srv/robot-logstream (deploy.sh copies this file there), or locally for a test:
+# Images come from GHCR, pushed by CI on every main commit; the server's update timer pulls them.
 #   cp deploy/.env.example deploy/.env  (edit), then from deploy/: docker compose up
 services:
   server:
-    image: robot-logstream-server:latest
+    image: ghcr.io/0-chan/robot-logstream-server:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env # alert channels and transfer settings (see .env.example)
     environment:
@@ -13,7 +14,7 @@ services:
       - ./state:/state # this month's transfer count survives restarts
 
   web:
-    image: robot-logstream-web:latest
+    image: ghcr.io/0-chan/robot-logstream-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on: [server]
     env_file: .env
