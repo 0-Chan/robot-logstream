@@ -8,16 +8,16 @@
 
 ![Robot Logstream 재생 화면](docs/screenshot.jpg)
 
-3D 점군 지도, RGB 카메라와 깊이 카메라, 관절과 IMU 차트가 하나의 재생 시각에 맞춰 함께 움직입니다.
+3D 점군 지도, RGB 카메라와 깊이 카메라, 관절과 IMU 차트가 같은 재생 시각에 맞춰 함께 움직입니다.
 
 ## 소개
 
 ETH Zurich RSL의 [GrandTour 데이터셋](https://huggingface.co/datasets/leggedrobotics/grand_tour_dataset) 시퀀스를 **WebSocket으로 재생**합니다. 4족 보행 로봇 ANYmal D가 녹화한 LiDAR, 카메라, IMU, 관절, GNSS 데이터를 다룹니다.
 
-- **WebSocket 실시간 스트리밍:** 서버가 연결마다 재생 시계를 두고, 화면에 보이는 토픽만 그 시각에 맞춰 보냅니다. seek와 배속에도 모든 패널이 같은 시각을 유지하고, 클라이언트가 느리면 오래된 프레임을 건너뜁니다.
+- **WebSocket 실시간 스트리밍:** 서버가 연결마다 재생 시계를 두고 화면에 보이는 토픽만 그 시각에 맞춰 보냅니다. seek와 배속에도 모든 패널이 같은 시각을 유지하고 클라이언트가 느리면 오래된 프레임을 건너뜁니다.
 - **정확한 표시:** 재생 시각보다 미래의 데이터나 이전 위치의 데이터는 그리지 않습니다. 지연과 연결 끊김은 상태 점과 실측 fps로 보여 줍니다.
-- **간이 CAD 위치 추정:** 점군 지도에서 벽과 바닥만 뽑은 간이 CAD로 로봇 위치를 다시 계산하고, 그 오차를 대시보드에서 비교합니다.
-- **자동 배포:** AWS Lightsail에서 운영하며, main에 push하면 CI를 거쳐 몇 분 안에 서버에 반영됩니다.
+- **간이 CAD 위치 추정:** 점군 지도에서 벽과 바닥만 뽑은 간이 CAD로 로봇 위치를 다시 계산하고 그 오차를 대시보드에서 비교합니다.
+- **자동 배포:** AWS Lightsail에서 운영하며 main에 push하면 CI를 거쳐 몇 분 안에 서버에 반영됩니다.
 
 ```
 data/raw/<seq>/          preprocess (Python)            data/prepared/<seq>/        server (TS, Hono)                web (React)
@@ -45,7 +45,7 @@ yaml · ply                                          manifest.json · static/   
 
 ## 사용법
 
-전처리가 끝났다면 의존성을 설치하고, 서버와 웹을 각각 다른 터미널에서 실행합니다.
+전처리가 끝났다면 의존성을 설치하고 서버와 웹을 각각 다른 터미널에서 실행합니다.
 
 ```bash
 cd dashboard && pnpm install
@@ -60,7 +60,7 @@ pnpm --filter @grandtour/web dev           # http://localhost:5173
 | 카메라 2칸 | 컬러 또는 깊이(turbo 색, 0.3~8 m). 오른쪽 위 배지는 상태 점(초록 최신, 노랑 이전 샘플, 회색 샘플 없음, 빨강 연결 끊김)과 최근 1초 동안 그린 프레임 수(실측 fps) |
 | 차트 2개 | 아무 시계열 토픽과 열(검색 가능한 멀티 셀렉트, 최대 8개). 관절·발 접촉·IMU·배터리 프리셋, 최근 10초 표시 |
 
-서버 연결이 끊기면 알림(토스트)이 뜨고 2초마다 다시 연결합니다. 화면에 보이는 토픽만 구독합니다. 패널 선택을 바꾸면 `subscribe` 메시지가 다시 전송됩니다.
+서버 연결이 끊기면 알림(토스트)이 뜨고 2초마다 다시 연결합니다. 화면에 보이는 토픽만 구독합니다. 패널 선택을 바꾸면 `subscribe` 메시지를 다시 보냅니다.
 
 ## 폴더 구조
 
@@ -91,7 +91,7 @@ grand_tour/
 **제어 메시지 (JSON 텍스트)**
 - 서버 → 클라이언트: `hello{sessionId, manifest}`, 100 ms마다 `clock{t, playing, speed, epoch}`, `error`
 - 클라이언트 → 서버: `subscribe{topics:[{name, maxHz?}]}`(교체 방식), `play{speed?}`, `pause`, `speed{speed}`, `seek{t, epoch}`
-- **epoch는 클라이언트가 정합니다.** seek마다 이전보다 큰 값을 보내고, 서버는 그 뒤 만드는 데이터에 그 값을 찍습니다. 같거나 작은 epoch의 seek는 거부합니다.
+- **epoch는 클라이언트가 정합니다.** seek마다 이전보다 큰 값을 보내고 서버는 그 뒤 만드는 데이터에 그 값을 찍습니다. 같거나 작은 epoch의 seek는 거부합니다.
 
 **데이터 메시지 (바이너리, 16바이트 헤더)**
 ```
@@ -101,7 +101,7 @@ SERIES_BATCH (2) : [u32 count][u32 cols][f64 ts × count][f32 values × count ×
 ```
 
 **서버 동작 (`apps/server/src/session.ts`)**
-- 연결마다 독립된 재생 시계를 두고, 20 ms tick마다 처리합니다.
+- 연결마다 독립된 재생 시계를 두고 20 ms tick마다 처리합니다.
 - 시계열: 지난 tick 이후 샘플을 `maxHz`로 줄여 보냅니다. 버리지 않습니다.
 - 프레임: 재생 시각의 최신 프레임이 바뀌었을 때만 보냅니다. 소켓에 2 MB 넘게 쌓여 있으면 그 tick은 건너뜁니다(최신 우선).
 - seek: 클라이언트가 보낸 epoch로 바꾸고 시계열 5초치를 백필합니다. 읽는 도중 seek가 들어온 프레임은 보내지 않습니다.
@@ -110,7 +110,7 @@ SERIES_BATCH (2) : [u32 count][u32 cols][f64 ts × count][f32 values × count ×
 
 ## 화면에 잘못된 데이터를 표시하지 않기 위한 규칙
 
-고빈도 센서 처리(worker + `data/live.ts`)와 React 상태(zustand)를 분리합니다. 센서 메시지가 React 렌더링을 일으키지 않고, 렌더러는 `requestAnimationFrame`에서 데이터를 읽기만 합니다.
+고빈도 센서 처리(worker + `data/live.ts`)와 React 상태(zustand)를 분리합니다. 센서 메시지가 React 렌더링을 일으키지 않고 렌더러는 `requestAnimationFrame`에서 데이터를 읽기만 합니다.
 
 | 단계 | 규칙 | 코드 |
 |---|---|---|
@@ -128,7 +128,7 @@ SERIES_BATCH (2) : [u32 count][u32 cols][f64 ts × count][f32 values × count ×
 
 ## 간이 CAD 지도와 CAD 기반 위치 추정 (오프라인 검증)
 
-GrandTour 데이터셋에는 현장 CAD가 없습니다. 그래서 DLIO 점군 지도에서 **큰 평면(벽, 바닥, 천장)만 뽑아 간이 CAD를 만들고**, 녹화된 LiDAR 스캔을 그 CAD에 맞춰 로봇 위치를 다시 계산합니다. 로봇에 탑재해 실시간으로 도는 위치 추정이 아니라, **"설계도 수준의 단순한 지도로 위치를 유지할 수 있는가"를 녹화 데이터로 확인하는 파이프라인**입니다.
+GrandTour 데이터셋에는 현장 CAD가 없습니다. 그래서 DLIO 점군 지도에서 **큰 평면(벽, 바닥, 천장)만 뽑아 간이 CAD를 만들고** 녹화된 LiDAR 스캔을 그 CAD에 맞춰 로봇 위치를 다시 계산합니다. 로봇에 탑재해 실시간으로 도는 위치 추정이 아니라, **"설계도 수준의 단순한 지도로 위치를 유지할 수 있는가"를 녹화 데이터로 확인하는 파이프라인**입니다.
 
 ```bash
 cd dashboard/preprocess
@@ -139,7 +139,7 @@ uv run localize    --prepared $P   # 스캔 × CAD → topics/cad_localization (
 ```
 
 1. **cad-extract:** RANSAC으로 평면을 반복해 찾습니다. 각 평면의 점을 0.25 m 격자에 찍고 직사각형 몇 개로 덮습니다. 그래서 문이 뚫린 벽은 여러 조각이 됩니다. 경사면(계단, 램프)은 제외합니다.
-   - `site.yaml` 규칙: 벽의 **면**은 선분 a→b입니다. 두께는 위에서 볼 때 a→b의 **오른쪽**으로 붙고, 로봇이 보는 쪽은 왼쪽입니다.
+   - `site.yaml` 규칙: 벽의 **면**은 선분 a→b입니다. 두께는 위에서 볼 때 a→b의 **오른쪽**으로 붙고 로봇이 보는 쪽은 왼쪽입니다.
    - 슬래브는 다각형 높이 z가 면입니다. `side: down`이면 바닥, `side: up`이면 천장입니다.
 2. **cad-build:** CadQuery로 솔리드를 만들어 STEP(mm)으로 저장합니다. 같은 솔리드를 삼각형으로 바꿔 GLB(m, Z-up, 노드 이름 `wall_NNN`/`slab_NNN`)로도 저장합니다.
    - 지도 점이 CAD 표면에서 얼마나 가까운지를 `static/cad.json`의 `mapFit`에 기록합니다.
@@ -165,13 +165,13 @@ uv run localize    --prepared $P   # 스캔 × CAD → topics/cad_localization (
 - 작은 조각을 지운 CAD(`--min-area 3`)는 화면은 깔끔하지만 오차가 커졌습니다(평균 0.40 m, p95 1.0 m).
 
 **한계:**
-- CAD를 DLIO 지도에서 만들었기 때문에, DLIO와의 비교는 독립적인 검증이 아닙니다.
+- CAD를 DLIO 지도에서 만들었기 때문에 DLIO와 비교한 결과는 독립적인 검증이 아닙니다.
 - `lost` 판정 기준(fitness, rmse, 보정량)은 이 시퀀스에서 한 번도 걸리지 않았습니다. 실제로 실패를 잡아내는지는 아직 확인하지 못했습니다.
-- 실제 현장 CAD를 쓰려면 STEP을 GLB로 바꾸고, `dlio_map`(또는 로봇 지도)과 CAD 좌표 사이의 변환을 먼저 구해야 합니다.
+- 실제 현장 CAD를 쓰려면 STEP을 GLB로 바꾸고 `dlio_map`(또는 로봇 지도)과 CAD 좌표 사이의 변환을 먼저 구해야 합니다.
 
 ## 배포 (AWS Lightsail)
 
-서울 리전 Lightsail 인스턴스 한 대에 Docker로 **Node 서버 + Caddy**를 띄웁니다. Caddy가 HTTPS 인증서 발급, 프론트 정적 파일 제공, `/ws` 프록시를 맡습니다. **인증 없이 공개**되어, 주소를 아는 사람은 누구나 접속할 수 있습니다. 페이지와 서버가 같은 도메인이라 CORS 설정이 필요 없습니다.
+서울 리전 Lightsail 인스턴스 한 대에 Docker로 **Node 서버 + Caddy**를 띄웁니다. Caddy가 HTTPS 인증서 발급, 프론트 정적 파일 제공, `/ws` 프록시를 맡습니다. **인증 없이 공개**되어 주소를 아는 사람은 누구나 접속할 수 있습니다. 페이지와 서버가 같은 도메인이라 CORS 설정이 필요 없습니다.
 
 ```
 infra/lightsail/   Terraform: 인스턴스(기본 small_3_0: 2 GB, 60 GB, 3 TB), 고정 IP, 방화벽(22/80/443), SSH 키
@@ -199,13 +199,13 @@ dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 �
    - 데이터, compose.yaml, Caddyfile이 바뀌었을 때만 다시 실행합니다(데이터가 그대로면 `SKIP_DATA=1`).
 3. **코드 배포는 자동입니다.** main에 push하면:
    - CI가 검사를 통과한 뒤 `ghcr.io/0-chan/robot-logstream-{server,web}`에 `<커밋 sha>`와 `latest` 태그로 이미지를 올립니다.
-   - 서버의 `robot-logstream-update.timer`가 1분마다 새 이미지를 확인하고, 바뀐 컨테이너만 교체합니다. 교체 순간 접속이 몇 초 끊깁니다.
+   - 서버의 `robot-logstream-update.timer`가 1분마다 새 이미지를 확인하고 바뀐 컨테이너만 교체합니다. 교체 순간 접속이 몇 초 끊깁니다.
    - CI의 deploy job이 `/health`의 `version`이 그 커밋 sha가 될 때까지 기다려 성공 여부를 표시합니다. 대상 주소는 repo variable `DEPLOY_URL`이고, 비어 있으면(서버를 내렸을 때) 건너뜁니다.
    - GitHub에서 서버로 들어가는 접속은 없습니다. SSH는 계속 내 IP에서만 열려 있습니다.
    - **되돌리기:** 서버 `/srv/robot-logstream/.env`에 `IMAGE_TAG=<이전 sha>`를 넣으면 1분 안에 그 버전으로 바뀌고 고정됩니다. 비우면 다시 main을 따라갑니다.
    - **로그:** `journalctl -u robot-logstream-update -n 50`
    - 처음 한 번: GHCR 패키지 두 개를 Public으로 바꿔야 서버가 로그인 없이 받을 수 있습니다(GitHub → Packages → Package settings).
-4. **도메인이 있다면** (지금은 `robot-logstream.0-chan.kim`) A 레코드를 고정 IP로 연결하고, 서버의 `/srv/robot-logstream/.env`에서 `SITE_ADDRESS`를 바꾼 뒤 `docker compose up -d`를 실행합니다.
+4. **도메인이 있다면** (지금은 `robot-logstream.0-chan.kim`) A 레코드를 고정 IP로 연결하고 서버의 `/srv/robot-logstream/.env`에서 `SITE_ADDRESS`를 바꾼 뒤 `docker compose up -d`를 실행합니다.
 5. **삭제:** `terraform destroy`. 그다음 repo variable `DEPLOY_URL`을 비웁니다. 고정 IP도 함께 해제됩니다. 인스턴스에서 떼어 둔 고정 IP는 과금됩니다.
 
 **로컬에서 같은 구성으로 시험하기:** `deploy/.env.example`을 `deploy/.env`로 복사하고 다음을 설정합니다.
@@ -215,7 +215,7 @@ dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 �
 그다음 `dashboard`에서 `docker buildx build --target server -t ghcr.io/0-chan/robot-logstream-server:dev --load .`와 같은 명령을 web 타깃에도 실행합니다. 마지막으로 `deploy`에서 `docker compose up`을 실행합니다.
 
 **주의**
-- 공개 사이트라 누구나 재생할 수 있습니다. 시청 1시간에 약 18 GB를 보내므로, 포함 송신량(3 TB, 시청 약 165시간)을 넘으면 GB당 USD 0.13가 과금됩니다. 접근을 막아야 하면 `Caddyfile`에 `basic_auth`를 넣거나 Cloudflare Access를 앞에 두세요.
+- 공개 사이트라 누구나 재생할 수 있습니다. 시청 1시간에 약 18 GB를 보내므로 포함 송신량(3 TB, 시청 약 165시간)을 넘으면 GB당 USD 0.13가 과금됩니다. 접근을 막아야 하면 `Caddyfile`에 `basic_auth`를 넣거나 Cloudflare Access를 앞에 두세요.
 
 ### 송신량 알림 (재생은 막지 않음)
 
@@ -228,7 +228,7 @@ dashboard/Dockerfile  --target server (Node) / --target web (Caddy + 빌드된 �
 
 - **채널 설정:** 서버의 `/srv/robot-logstream/.env`(설명은 `deploy/.env.example`). `deploy.sh`가 첫 배포 때 각 URL을 묻습니다. 빈칸으로 두면 그 채널은 쓰지 않습니다.
   - **이메일:** `SMTP_URL`(예: Gmail 앱 비밀번호 `smtps://you%40gmail.com:app-password@smtp.gmail.com:465`)과 `ALERT_EMAIL_TO`를 넣습니다. 비밀번호에 `$`가 있으면 compose가 변수로 해석하므로 `$$`로 적으세요.
-  - **휴대폰 푸시:** ntfy 앱에서 추측하기 어려운 토픽을 구독하고, 그 주소를 `NTFY_TOPIC_URL`에 넣습니다.
+  - **휴대폰 푸시:** ntfy 앱에서 추측하기 어려운 토픽을 구독하고 그 주소를 `NTFY_TOPIC_URL`에 넣습니다.
 - **설정 확인:** `NOTIFY_TEST=1`이면 서버가 시작할 때 모든 채널로 시험 알림을 보냅니다. 첫 배포에서는 켜져 있으니, 확인한 뒤 비우고 `docker compose up -d`를 다시 실행하세요.
 - **현재 사용량:** `curl https://<주소>/health`의 `transfer` 항목(이번 달 GB, %, 최근 1시간, 월말 예상, 초과 예상 비용)
 - 이번 달 집계는 `state/transfer.json`에 저장되어 재시작해도 이어지고, 같은 알림을 다시 보내지 않습니다.
@@ -277,4 +277,4 @@ uv run verify --src ../../data/raw/2024-11-02-17-10-25
 
 ## 라이선스
 
-코드는 [MIT License](LICENSE)를 따릅니다. GrandTour 데이터셋은 저장소에 포함되지 않으며, 데이터셋 자체의 라이선스(Hugging Face 표기 기준 MIT)를 따릅니다.
+코드는 [MIT License](LICENSE)를 따릅니다. GrandTour 데이터셋은 저장소에 포함되지 않으며 데이터셋 자체의 라이선스(Hugging Face 표기 기준 MIT)를 따릅니다.

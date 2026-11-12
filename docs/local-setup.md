@@ -1,6 +1,6 @@
 # 로컬 설치와 실행
 
-원본 데이터를 받아 전처리하고, 서버와 웹을 로컬에서 띄우는 순서입니다. 프로젝트 소개와 나머지 내용은 [README](../README.md)에 있습니다.
+원본 데이터를 받아 전처리하고 서버와 웹을 로컬에서 띄우는 순서입니다. 프로젝트 소개와 나머지 내용은 [README](../README.md)에 있습니다.
 
 ## 준비물
 
@@ -46,13 +46,13 @@ uv run verify --src ../../data/raw/2024-11-02-17-10-25   # 원본과 무작위 �
   - `--topics a,b`: 일부 토픽만 처리
   - `--force`: 이미 끝난 토픽도 다시 생성
   - `--workers N`: 병렬 처리 수 (기본 4)
-- **재시작 가능:** 토픽마다 마지막에 `meta.json`을 쓰고, 이 파일이 있는 토픽은 건너뜁니다.
-- **소요 시간:** 이 머신(10코어, 16 GB)에서 가장 오래 걸린 토픽은 84초(깊이 카메라)였고, 나머지는 대부분 수 초~30초였습니다.
+- **재시작 가능:** 토픽마다 마지막에 `meta.json`을 쓰고 이 파일이 있는 토픽은 건너뜁니다.
+- **소요 시간:** 이 머신(10코어, 16 GB)에서 가장 오래 걸린 토픽은 84초(깊이 카메라)였고 나머지는 대부분 수 초~30초였습니다.
 - 처리할 토픽과 방식은 `preprocess/topics.yaml`에서 정합니다.
 
 ### 출력 형식 (`data/prepared/<seq>/`)
 
-모든 파일은 리틀 엔디언이고, 토픽마다 `topics/<topic>/timestamps.f64`(Unix 초, Float64)가 있습니다.
+모든 파일은 리틀 엔디언이고 토픽마다 `topics/<topic>/timestamps.f64`(Unix 초, Float64)가 있습니다.
 
 | kind | 토픽 수 | 용량 | 파일 | 프레임 내용 |
 |---|---|---|---|---|
@@ -97,7 +97,7 @@ pnpm --filter @grandtour/server probe -- --seconds 10 --stall 3    # 3초 동안
 | 대역폭 | 4.8 MB/s | 18 MB/s |
 | seek 후 첫 프레임 | 12~20 ms | 18 ms |
 
-배압 확인: 3초 동안 수신을 멈추자 서버가 프레임 330개를 건너뛰었습니다. 재개 직후 최신 프레임은 재생 시각보다 11 ms만 뒤처져, 지연이 쌓이지 않았습니다.
+배압 확인: 3초 동안 수신을 멈추자 서버가 프레임 330개를 건너뛰었습니다. 재개 직후 최신 프레임은 재생 시각보다 11 ms만 뒤처져 지연이 쌓이지 않았습니다.
 
 ## 4단계: 웹 실행
 
@@ -107,6 +107,6 @@ pnpm --filter @grandtour/web dev           # http://localhost:5173
 
 서버 주소를 바꾸려면 `VITE_SERVER_URL=http://host:8787`을 지정합니다.
 
-UI는 **shadcn/ui**(Radix 기반, Nova 프리셋, 다크 테마 고정)와 **Tailwind CSS v4**로 만들었습니다. 컴포넌트는 `apps/web/src/components/ui/`에 있고, 추가할 때는 `apps/web`에서 `pnpm dlx shadcn@4.22.1 add <이름>`을 실행합니다. 차트 색은 테마 토큰 `--chart-1~8`(`src/styles.css`)에서 가져옵니다.
+UI는 **shadcn/ui**(Radix 기반, Nova 프리셋, 다크 테마 고정)와 **Tailwind CSS v4**로 만들었습니다. 컴포넌트는 `apps/web/src/components/ui/`에 있고 추가할 때는 `apps/web`에서 `pnpm dlx shadcn@4.22.1 add <이름>`을 실행합니다. 차트 색은 테마 토큰 `--chart-1~8`(`src/styles.css`)에서 가져옵니다.
 
 화면 구성과 사용법은 README의 [사용법](../README.md#사용법)을 보세요.
